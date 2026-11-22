@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Train Logistics Puzzle</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f14; font-family: system-ui, sans-serif; }
+    #hud { position: absolute; top: 12px; left: 12px; color: #cfe3ff; z-index: 10;
+           background: rgba(10,16,24,.75); padding: 10px 14px; border-radius: 10px;
+           font-size: 14px; line-height: 1.5; min-width: 220px; }
+    #hud h1 { font-size: 16px; margin: 0 0 6px; }
+    #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+    #hud button { margin-top: 8px; margin-right: 6px; padding: 4px 10px; border: 0; border-radius: 6px;
+                 background: #2b6cb0; color: #fff; cursor: pointer; }
+    #hud button:hover { background: #3182ce; }
+    #hint { position: absolute; bottom: 12px; left: 12px; color: #8aa2c0; font-size: 12px; z-index: 10;
+            background: rgba(10,16,24,.6); padding: 6px 10px; border-radius: 8px; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <h1>🚂 Train Logistics</h1>
+    <div class="row"><span>Tick</span><b id="tick">0</b></div>
+    <div class="row"><span>Score</span><b id="score">0</b></div>
+    <div class="row"><span>Money</span><b id="money">0</b></div>
+    <div class="row"><span>Signals</span><b id="signals">–</b></div>
+    <div>
+      <button id="btn-pause">Pause</button>
+      <button id="btn-speed">Speed 1x</button>
+      <button id="btn-reset">New game</button>
+    </div>
+  </div>
+  <div id="hint">Left-drag: rotate · Wheel: zoom · Right-drag: pan</div>
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+                  "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/" } }
+  </script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

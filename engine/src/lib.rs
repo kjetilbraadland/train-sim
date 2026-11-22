@@ -1,0 +1,50 @@
+//! train-sim-engine
+//!
+//! A pure, deterministic train-logistics simulation. No I/O, no network, no
+//! graphics, no wall clock. The whole game state is a value in [`SimState`];
+//! advancing the game is `state.tick()`. This makes the engine trivially
+//! testable and reproducible: the same initial state + same input sequence
+//! always yields the same state (a property we assert in tests).
+//!
+//! Architecture boundary:
+//!   - `engine` (this crate): pure state + rules. No dependencies beyond serde.
+//!   - `server`: axum + WebSocket. Reads commands, applies them, broadcasts
+//!     state snapshots. Knows nothing about rendering.
+//!   - `client`: three.js. Subscribes to snapshots, renders. Knows nothing
+//!     about rules.
+//!
+//! Determinism rules:
+//!   - Time is discrete ticks (`SIM_DT` seconds per tick).
+//!   - No `SystemTime`, no `rand::thread_rng`. Randomness (demand generation)
+//!     comes from a seeded `Rng` stored in state, so replays are exact.
+
+pub mod map;
+pub mod scoring;
+pub mod state;
+pub mod sim;
+
+pub use state::{Goods, SimState, Train};
+pub use map::{City, Map, Node, Edge};
+pub use sim::Sim;
+
+/// Seconds simulated per tick. Fixed, so movement is deterministic.
+pub const SIM_DT: f64 = 0.1;
+
+/// A command the player issues to the simulation. The server decodes JSON into
+/// these and applies them to the state.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+pub enum Command {
+    /// Start a new game with the default map (or a provided one).
+    NewGame { map_id: Option<String> },
+    /// Pause / resume the simulation.
+    SetPaused { paused: bool },
+    /// Change the simulation speed multiplier (1.0 = realtime).
+    SetSpeed { multiplier: f64 },
+    /// Assign a route to a train: ordered list of node ids.
+    SetRoute { train_id: u32, route: Vec<u32> },
+    /// At a station: load `qty` of `good` (from city supply into carriages).
+    Load { train_id: u32, good: Goods, qty: u32 },
+    /// At a station: unload `qty` of `good` (from carriages into city demand).
+    Unload { train_id: u32, good: Goods, qty: u32 },
+}

@@ -47,25 +47,31 @@ cargo test
 Engine tests cover: map well-formedness, train movement, signal blocking,
 auto-trade scoring, and determinism (identical inputs → identical state).
 
+## Documentation
+
+- **`DESIGN.md`** — the source of truth for game design (owner: Dampkjetil).
+- **`GLOSSARY.md`** — shared vocabulary; use these terms in code and reports.
+- **`docs/adr/`** — Architecture Decision Records (the *why* behind decisions).
+- **`RUNBOOK.md`** — the daily cron's step-by-step process.
+
 ## Commands (WebSocket JSON)
 
 ```json
-{"type":"newGame","mapId":null}
-{"type":"setPaused","paused":true}
-{"type":"setSpeed","multiplier":2.0}
-{"type":"setRoute","trainId":0,"route":[0,1,2,3]}
-{"type":"load","trainId":0,"good":"coal","qty":4}
-{"type":"unload","trainId":0,"good":"coal","qty":4}
+{"type":"NewGame","mapId":null}
+{"type":"SetPaused","paused":true}
+{"type":"SetSpeed","multiplier":2.0}
+{"type":"SetRoute","trainId":0,"route":[0,1,2,3]}
+{"type":"Load","trainId":0,"good":"Coal","qty":4}
+{"type":"Unload","trainId":0,"good":"Coal","qty":4}
 ```
 
-## Roadmap
+## Roadmap (phases — see DESIGN.md)
 
 - [x] Deterministic engine core (map, trains, signals, auto-trade)
 - [x] axum server + WebSocket snapshots
 - [x] three.js client (map, trains, signals, HUD)
-- [ ] Manual load/unload UI (currently auto-trade)
-- [ ] Route planning UI (click nodes to build a route)
-- [ ] Multiple trains + train purchase
-- [ ] Signal timing as a player tool (block sections)
+- [ ] **M1 — Build system:** place track/signals/sidings/trains; costs; money
+- [ ] **M2 — Sandbox:** open-ended build loop is playable and fun to optimize
+- [ ] **M3 — Puzzle level:** timer + deliver-100 target + win/lose
 - [ ] Demand generation from seeded RNG
 - [ ] Score/leaderboard, win conditions

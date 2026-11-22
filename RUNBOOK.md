@@ -13,10 +13,13 @@ cd /opt/train-sim
 
 ## Source of truth
 `DESIGN.md` in the repo (owner: Dampkjetil). Read it first. Implement strictly
-against it. **You are an engineer, not a game designer.** If the design is
-unclear or an open question blocks you, flag it in the report (and note it in
-DESIGN.md section 8), then proceed with the minimal reasonable assumption
-*explicitly labeled*. Never invent design calls.
+against it. Use the terms from `GLOSSARY.md` in code and reports. When a
+decision is non-obvious, check `docs/adr/` for the accepted ADR that governs
+it; if none exists, that's a design gap — flag it, don't invent a decision.
+**You are an engineer, not a game designer.** If the design is unclear or an
+open question blocks you, flag it in the report (and note it in DESIGN.md
+section 8), then proceed with the minimal reasonable assumption *explicitly
+labeled*. Never invent design calls.
 
 ## Steps
 1. **Health:** `systemctl status train-sim` and

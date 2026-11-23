@@ -48,3 +48,9 @@ against it. To change a decision, write a new ADR that supersedes the old one
 | [0006](0006-auto-trade-trains.md) | Trains auto-load/unload; the player is a system designer | Accepted |
 | [0007](0007-economy-v1.md) | Economy v1 numbers | Accepted |
 | [0008](0008-branch-based-development.md) | Branch-based development: cron implements, owner reviews on GitHub | Accepted |
+| [0009](0009-engine-owned-command-application.md) | Command application is engine-owned; the server owns no rules | Accepted |
+| [0010](0010-empty-start-game.md) | New game starts empty; the player buys the first train | Accepted |
+| [0011](0011-atomic-command-rejection.md) | Rejected commands are atomic and leave state unchanged | Accepted |
+| [0012](0012-once-per-stop-auto-trade.md) | Auto-trade is once-per-stop, gated by `traded_at` | Accepted |
+| [0013](0013-fixed-train-speed.md) | Train speed is fixed (no speed upgrade) | Accepted |
+| [0014](0014-no-train-cap.md) | No train cap (train count limited only by money) | Accepted |

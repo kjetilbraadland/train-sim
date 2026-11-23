@@ -19,6 +19,11 @@ code or reports.
   `NewGame`, `SetPaused`, `SetSpeed`, `SetRoute`, `Load`, `Unload`,
   `BuyTrain` + build commands in M1). Applied by `command::apply` in the
   engine — the server owns no rules.
+- **CmdError** — the error a rejected command returns (e.g.
+  `InsufficientFunds`, `UnknownNode`, `UnknownTrain`, `UnsupportedMap`). A
+  rejected command leaves the state unchanged (ADR 0011).
+- **New game** — `SimState::new_game()`: the default map, starting funds
+  (500), no trains; the player buys the first train (ADR 0010).
 - **Snapshot** — the full JSON `SimState` broadcast server→client each tick.
 
 ## Map & network
@@ -60,12 +65,14 @@ code or reports.
 - **Demand** — goods a city wants (per-tick capacity).
 - **Auto-trade** — on arrival at a station, a train unloads cargo matching
   the city's demand and loads from its supply up to capacity (ADR 0006).
-  Happens once per arrival, not every tick.
+  Happens once per stop, not every tick (gated by `traded_at`,
+  ADR 0012); a train bought at a station trades on its first tick.
 
 ## Economy
 
 - **Money** — the single currency. Earned from deliveries (+10/unit), spent
-  on track/signals/sidings/trains (ADR 0007).
+  on track/signals/sidings/trains (ADR 0007). No train cap: train count
+  is limited only by money (ADR 0014); train speed is fixed (ADR 0013).
 - **Throughput** — units delivered per unit time; the metric the player
   optimizes.
 

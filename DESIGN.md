@@ -78,12 +78,15 @@ tunable; this is the v1 baseline.
 
 ## 8. Open questions (flag, don't guess)
 
+- [x] **Train speed: FIXED.** Trains have a fixed speed (base 15 m/s); no
+      speed upgrade. (Owner decision, 2026-11-23.)
+- [x] **No train cap.** The number of trains is unbounded — limited only by
+      money. (Owner decision, 2026-11-23.)
 - [ ] Grid cell size / world scale (meters per cell).
-- [ ] Do trains have a fixed speed, or a speed the player can raise (cost)?
 - [ ] Siding length: how many carriages / how long must it be?
 - [ ] Can the player delete placed objects (and get a refund)?
 - [ ] City supply/demand: fixed per city, or do they vary over time?
-- [ ] Max trains / max track (any cap), or unbounded?
+- [ ] Max track (any cap), or unbounded?
 
 > When an open question blocks work, the cron notes it here and in the daily
 > report, and proceeds with the minimal reasonable assumption *explicitly

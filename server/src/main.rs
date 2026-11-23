@@ -117,7 +117,7 @@ async fn status_handler(State(app): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 async fn root_handler() -> impl IntoResponse {
-    "train-sim server"
+    axum::response::Html(include_str!("../../static/index.html"))
 }
 
 async fn ws_handler(

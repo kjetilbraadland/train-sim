@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ---------- setup ----------
 const scene = new THREE.Scene();
@@ -42,6 +43,29 @@ scene.add(grid);
 // ---------- world objects ----------
 const world = { map: null, edgeMeshes: new Map(), nodeMeshes: new Map(),
                 cityMeshes: new Map(), signalMeshes: new Map(), trainMeshes: new Map() };
+
+// ---------- model loading ----------
+const gltf = new GLTFLoader();
+const modelCache = {};
+function loadModel(url) {
+  return modelCache[url] ??= new Promise((res, rej) =>
+    gltf.load(url, g => res(g.scene), undefined, rej));
+}
+function spawnModel(url, parent, place) {
+  loadModel(url).then(tpl => {
+    const m = tpl.clone(true);
+    if (place) place(m);
+    parent.add(m);
+  }).catch(e => console.error(e));
+}
+function goodIcon(parent, good, x, y, z) {
+  spawnModel(`/models/goods_${good.toLowerCase()}.glb`, parent, m => {
+    m.scale.setScalar(2.5);
+    m.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(m);
+    m.position.set(x, y - b.min.y, z);
+  });
+}
 
 const GOOD_COLORS = { Coal: 0x555555, Steel: 0x8899aa, Food: 0x55cc55, Timber: 0xb08040 };
 const GOOD_LABELS = { Coal: 'Coal', Steel: 'Steel', Food: 'Food', Timber: 'Timber' };
@@ -109,6 +133,8 @@ function buildMap(map) {
     );
     base.position.y = 8;
     g.add(base);
+    // Station model on top of the city block
+    spawnModel('/models/station.glb', g, m => { m.position.set(-28, 16, 0); });
     // Supply/demand pips
     const pips = new THREE.Group();
     let i = 0;
@@ -117,6 +143,7 @@ function buildMap(map) {
         new THREE.MeshStandardMaterial({ color: GOOD_COLORS[good] }));
       pip.position.set((i - c.supply.length / 2) * 20, 30, -20);
       g.add(pip); i++;
+      goodIcon(g, good, pip.position.x, 37, pip.position.z);
     }
     i = 0;
     for (const [good] of c.demand) {
@@ -124,6 +151,7 @@ function buildMap(map) {
         new THREE.MeshStandardMaterial({ color: GOOD_COLORS[good], emissive: GOOD_COLORS[good], emissiveIntensity: 0.25 }));
       pip.position.set((i - c.demand.length / 2) * 20, 30, 20);
       g.add(pip); i++;
+      goodIcon(g, good, pip.position.x, 37, pip.position.z);
     }
     const label = labelSprite(c.name);
     label.position.y = 55;
@@ -161,35 +189,25 @@ function updateState(s) {
   for (const t of s.trains) {
     let m = world.trainMeshes.get(t.id);
     if (!m) {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(24, 16, 44),
-        new THREE.MeshStandardMaterial({ color: 0xd4a017 })
-      );
-      body.position.y = 12;
-      g.add(body);
-      const cab = new THREE.Mesh(
-        new THREE.BoxGeometry(20, 12, 14),
-        new THREE.MeshStandardMaterial({ color: 0x8a6a10 })
-      );
-      cab.position.set(0, 22, -20);
-      g.add(cab);
-      scene.add(g);
-      world.trainMeshes.set(t.id, g);
+      m = new THREE.Group();
+      spawnModel('/models/train.glb', m);
+      scene.add(m);
+      world.trainMeshes.set(t.id, m);
     }
     // Position: interpolate along edge, or sit at node.
+    // GLB base is y=0; track top is y=6 (track centre y=2, radius 4).
     let pos;
     if (t.edge != null) {
       const e = s.map.edges.find(e => e.id === t.edge);
       const a = s.map.nodes.find(n => n.id === e.a);
       const b = s.map.nodes.find(n => n.id === e.b);
-      const va = new THREE.Vector3(a.pos[0], 10, a.pos[1]);
-      const vb = new THREE.Vector3(b.pos[0], 10, b.pos[1]);
+      const va = new THREE.Vector3(a.pos[0], 6, a.pos[1]);
+      const vb = new THREE.Vector3(b.pos[0], 6, b.pos[1]);
       pos = va.clone().lerp(vb, t.progress);
       m.lookAt(vb);
     } else {
       const n = s.map.nodes.find(n => n.id === t.node);
-      pos = new THREE.Vector3(n.pos[0], 10, n.pos[1]);
+      pos = new THREE.Vector3(n.pos[0], 6, n.pos[1]);
     }
     m.position.copy(pos);
   }

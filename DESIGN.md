@@ -80,10 +80,15 @@ tunable; this is the v1 baseline.
 
 - [ ] Grid cell size / world scale (meters per cell).
 - [ ] Do trains have a fixed speed, or a speed the player can raise (cost)?
+  *Flagged 2026-11-23 (M1 BuyTrain): bought trains use the fixed base speed
+  15 m/s (same as the pre-M1 starter train) — minimal assumption, not a
+  design call.*
 - [ ] Siding length: how many carriages / how long must it be?
 - [ ] Can the player delete placed objects (and get a refund)?
 - [ ] City supply/demand: fixed per city, or do they vary over time?
 - [ ] Max trains / max track (any cap), or unbounded?
+  *Flagged 2026-11-23 (M1 BuyTrain): no cap — trains are unbounded, limited
+  only by money — minimal assumption, not a design call.*
 
 > When an open question blocks work, the cron notes it here and in the daily
 > report, and proceeds with the minimal reasonable assumption *explicitly

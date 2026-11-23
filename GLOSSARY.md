@@ -16,8 +16,9 @@ code or reports.
 - **Deterministic** — same initial state + same command sequence ⇒ same
   result. No wall clock, no unseeded RNG.
 - **Command** — a player intent the client sends to the server (tagged enum:
-  `NewGame`, `SetPaused`, `SetSpeed`, `SetRoute`, `Load`, `Unload`, + build
-  commands in M1).
+  `NewGame`, `SetPaused`, `SetSpeed`, `SetRoute`, `Load`, `Unload`,
+  `BuyTrain` + build commands in M1). Applied by `command::apply` in the
+  engine — the server owns no rules.
 - **Snapshot** — the full JSON `SimState` broadcast server→client each tick.
 
 ## Map & network

@@ -17,8 +17,10 @@ impl Sim {
         state.tick += 1;
 
         Self::update_signals(state);
-        Self::move_trains(state);
+        // Auto-trade runs before movement so a train standing at a station
+        // (e.g. one just bought there) loads before it departs on this tick.
         Self::auto_trade(state);
+        Self::move_trains(state);
     }
 
     /// Signal logic (automatic block sections): a signal is green iff the
@@ -113,23 +115,27 @@ impl Sim {
                         t.progress = 0.0;
                         t.route_idx += 1;
                         t.just_arrived = true;
+                        t.traded_at = None; // allow auto-trade at this stop
                     }
                 }
             }
         }
     }
 
-    /// Auto-trade: when a train *arrives* at a station, unload cargo that
-    /// matches the city's demand (earning money + score), then load from the
-    /// city's supply up to capacity. Gated on `just_arrived` so it happens
-    /// once per stop, not every tick while the train is idle.
+    /// Auto-trade: when a train *arrives* at a station (or is stopped at
+    /// one, e.g. just bought there), unload cargo that matches the city's
+    /// demand (earning money + score), then load from the city's supply up
+    /// to capacity. Gated so it happens once per stop, not every tick while
+    /// the train is idle (`traded_at` remembers the last traded node).
     fn auto_trade(state: &mut SimState) {
         for t in state.trains.iter_mut() {
-            if !t.just_arrived {
+            let eligible = t.just_arrived || (t.edge.is_none() && t.traded_at != Some(t.node));
+            if !eligible {
                 continue;
             }
             let city = state.map.cities.iter().find(|c| c.station == t.node);
             let Some(city) = city else { continue };
+            t.traded_at = Some(t.node);
 
             // Unload: match cargo against demand.
             for (g, cap) in &city.demand {
@@ -140,7 +146,7 @@ impl Sim {
                 let qty = have.min(*cap);
                 t.set_cargo(*g, have - qty);
                 state.score += qty;
-                state.money += qty * 10; // 10 per unit delivered
+                state.money += qty * crate::economy::DELIVERY_REWARD;
             }
 
             // Load: fill capacity from supply.
@@ -178,6 +184,7 @@ mod tests {
                 capacity: 8,
                 held_by_signal: false,
                 just_arrived: false,
+                traded_at: None,
             }],
             signals: vec![],
             tick: 0,
@@ -255,10 +262,11 @@ mod tests {
             route_idx: 0,
             cargo: vec![],
             capacity: 8,
-            held_by_signal: false,
-            just_arrived: false,
-        });
-        // Move the first train to node 1 (edge 0 is 300 m at 15 m/s = 200 ticks).
+                held_by_signal: false,
+                just_arrived: false,
+                traded_at: None,
+            });
+            // Move the first train to node 1 (edge 0 is 300 m at 15 m/s = 200 ticks).
         for _ in 0..200 {
             Sim::tick(&mut s);
         }

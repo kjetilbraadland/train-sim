@@ -39,6 +39,9 @@ pub struct Train {
     /// True on the tick the train arrives at a node (used so auto-trade
     /// happens once per arrival, not every tick while stopped).
     pub just_arrived: bool,
+    /// The node where the last auto-trade happened (a train stopped at a
+    /// station — e.g. one just bought there — trades once, not every tick).
+    pub traded_at: Option<u32>,
 }
 
 impl Train {
@@ -87,13 +90,29 @@ pub struct SimState {
     pub speed: f64,
     /// Score: total goods delivered so far.
     pub score: u32,
-    /// Money: earned from deliveries, spent on nothing yet (future: upgrades).
+    /// Money: earned from deliveries, spent on builds (M1).
     pub money: u32,
     /// Deterministic RNG state for demand generation (xorshift64).
     pub rng_state: u64,
 }
 
 impl SimState {
+    /// A fresh game: the default map, starting funds, no trains (M1: the
+    /// player builds everything; the player buys the first train).
+    pub fn new_game() -> Self {
+        Self {
+            map: crate::map::default_map(),
+            trains: vec![],
+            signals: crate::map::default_signals(),
+            tick: 0,
+            paused: false,
+            speed: 1.0,
+            score: 0,
+            money: crate::economy::START_FUNDS,
+            rng_state: 0x5eed,
+        }
+    }
+
     /// Deterministic xorshift64 step. No external RNG crate, so replays are
     /// exact and the state is fully serializable.
     pub fn rng_next(&mut self) -> u64 {
@@ -131,7 +150,7 @@ mod tests {
         let mut t = Train {
             id: 0, node: 0, edge: None, progress: 0.0, speed: 10.0,
             route: vec![], route_idx: 0, cargo: vec![], capacity: 10,
-            held_by_signal: false, just_arrived: false,
+            held_by_signal: false, just_arrived: false, traded_at: None,
         };
         t.set_cargo(Goods::Coal, 3);
         assert_eq!(t.cargo_qty(Goods::Coal), 3);

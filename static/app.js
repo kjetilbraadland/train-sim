@@ -248,6 +248,16 @@ document.getElementById('btn-speed').onclick = () => {
   document.getElementById('btn-speed').textContent = `Speed ${speed}x`;
 };
 document.getElementById('btn-reset').onclick = () => cmd({ type: 'NewGame', map_id: null });
+document.getElementById('btn-buy-train').onclick = () => {
+  // Buy a train at node 0 (City A's station). Cost 200 (economy v1).
+  // The server rejects with a log warning if funds are insufficient.
+  cmd({ type: 'BuyTrain', node: 0 });
+};
+document.getElementById('btn-route').onclick = () => {
+  // Assign the first train the route A(0) -> B(3). Server rejects if no
+  // train exists yet (buy one first).
+  cmd({ type: 'SetRoute', train_id: 1, route: [0, 1, 2, 3] });
+};
 
 // ---------- loop ----------
 connect();

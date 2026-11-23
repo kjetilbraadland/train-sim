@@ -18,6 +18,8 @@
 //!   - No `SystemTime`, no `rand::thread_rng`. Randomness (demand generation)
 //!     comes from a seeded `Rng` stored in state, so replays are exact.
 
+pub mod command;
+pub mod economy;
 pub mod map;
 pub mod scoring;
 pub mod state;
@@ -30,8 +32,8 @@ pub use sim::Sim;
 /// Seconds simulated per tick. Fixed, so movement is deterministic.
 pub const SIM_DT: f64 = 0.1;
 
-/// A command the player issues to the simulation. The server decodes JSON into
-/// these and applies them to the state.
+/// A command the player issues to the simulation. The server decodes JSON
+/// into these and applies them to the state via [`command::apply`].
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum Command {
@@ -47,4 +49,6 @@ pub enum Command {
     Load { train_id: u32, good: Goods, qty: u32 },
     /// At a station: unload `qty` of `good` (from carriages into city demand).
     Unload { train_id: u32, good: Goods, qty: u32 },
+    /// Buy a train at a node (costs `economy::TRAIN_COST`). M1.
+    BuyTrain { node: u32 },
 }

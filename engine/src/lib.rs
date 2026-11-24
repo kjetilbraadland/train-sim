@@ -51,4 +51,14 @@ pub enum Command {
     Unload { train_id: u32, good: Goods, qty: u32 },
     /// Buy a train at a node (costs `economy::TRAIN_COST`). M1.
     BuyTrain { node: u32 },
+    /// Build a track segment (costs `economy::TRACK_COST`) from `from`, one
+    /// grid cell (300 m) in direction `dir`:
+    /// 0=E 1=W 2=N 3=S 4=NE 5=NW 6=SE 7=SW (ADR 0004, ADR 0015).
+    /// If no node exists in the target cell, a node is created there.
+    /// M1.
+    BuildTrack { from: u32, dir: u8 },
+    /// Place a signal (costs `economy::SIGNAL_COST`) on `edge`, protecting
+    /// the direction from `from` (must be an endpoint of the edge) toward
+    /// the other endpoint. Automatic block-section signal (ADR 0005). M1.
+    BuildSignal { edge: u32, from: u32 },
 }

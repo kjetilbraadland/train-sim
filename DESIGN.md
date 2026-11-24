@@ -83,6 +83,8 @@ tunable; this is the v1 baseline.
 - [x] **No train cap.** The number of trains is unbounded — limited only by
       money. (Owner decision, 2026-11-23.)
 - [ ] Grid cell size / world scale (meters per cell).
+      *Labeled assumption (ADR 0015, 2026-11-24): 300 m, matching the
+      default map's dominant segment spacing; pending owner confirmation.*
 - [ ] Siding length: how many carriages / how long must it be?
 - [ ] Can the player delete placed objects (and get a refund)?
 - [ ] City supply/demand: fixed per city, or do they vary over time?

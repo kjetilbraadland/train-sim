@@ -71,6 +71,47 @@ impl Map {
         let dy = na.pos[1] - nb.pos[1];
         Some((dx * dx + dy * dy).sqrt())
     }
+    /// The edge already connecting `a` and `b`, if any.
+    pub fn edge_between(&self, a: u32, b: u32) -> Option<&Edge> {
+        self.edges
+            .iter()
+            .find(|e| (e.a == a && e.b == b) || (e.b == a && e.a == b))
+    }
+}
+
+/// Grid cell size in metres (ADR 0004 placement grid; ADR 0015 build
+/// commands). Labeled assumption: 300 m matches the default map's dominant
+/// segment spacing (flagged in DESIGN.md §8).
+pub const GRID_STEP: f64 = 300.0;
+
+/// One grid step (in metres) for the 8-way direction:
+/// 0=E 1=W 2=N 3=S 4=NE 5=NW 6=SE 7=SW (map y-axis points "north").
+/// Diagonal steps move 300 m in each axis (300√2 m total).
+pub fn grid_dir_step(dir: u8) -> Option<[f64; 2]> {
+    let d = match dir {
+        0 => [1.0, 0.0],
+        1 => [-1.0, 0.0],
+        2 => [0.0, 1.0],
+        3 => [0.0, -1.0],
+        4 => [1.0, 1.0],
+        5 => [-1.0, 1.0],
+        6 => [1.0, -1.0],
+        7 => [-1.0, -1.0],
+        _ => return None,
+    };
+    Some([d[0] * GRID_STEP, d[1] * GRID_STEP])
+}
+
+/// Find an existing node within `eps` metres of `pos`. Used so a build can
+/// connect to a nearby node instead of creating a duplicate one.
+pub fn node_near(map: &Map, pos: [f64; 2], eps: f64) -> Option<u32> {
+    map.nodes
+        .iter()
+        .find(|n| {
+            let d = ((n.pos[0] - pos[0]).powi(2) + (n.pos[1] - pos[1]).powi(2)).sqrt();
+            d <= eps
+        })
+        .map(|n| n.id)
 }
 
 /// Build the default small puzzle map: 6 cities, ~14 nodes, a few signals.

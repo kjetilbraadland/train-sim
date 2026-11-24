@@ -17,11 +17,12 @@ code or reports.
   result. No wall clock, no unseeded RNG.
 - **Command** — a player intent the client sends to the server (tagged enum:
   `NewGame`, `SetPaused`, `SetSpeed`, `SetRoute`, `Load`, `Unload`,
-  `BuyTrain` + build commands in M1). Applied by `command::apply` in the
-  engine — the server owns no rules.
+  `BuyTrain`, `BuildTrack`, `BuildSignal`). Applied by `command::apply`
+  in the engine — the server owns no rules.
 - **CmdError** — the error a rejected command returns (e.g.
-  `InsufficientFunds`, `UnknownNode`, `UnknownTrain`, `UnsupportedMap`). A
-  rejected command leaves the state unchanged (ADR 0011).
+  `InsufficientFunds`, `UnknownNode`, `UnknownTrain`, `UnsupportedMap`,
+  `DuplicateEdge`, `SignalAlreadyPlaced`, `RouteDisconnected`). A rejected
+  command leaves the state unchanged (ADR 0011).
 - **New game** — `SimState::new_game()`: the default map, starting funds
   (500), no trains; the player buys the first train (ADR 0010).
 - **Snapshot** — the full JSON `SimState` broadcast server→client each tick.

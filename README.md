@@ -63,7 +63,15 @@ auto-trade scoring, and determinism (identical inputs → identical state).
 {"type":"SetRoute","trainId":0,"route":[0,1,2,3]}
 {"type":"Load","trainId":0,"good":"Coal","qty":4}
 {"type":"Unload","trainId":0,"good":"Coal","qty":4}
+{"type":"BuyTrain","node":0}
+{"type":"BuildTrack","from":5,"dir":0}
+{"type":"BuildSignal","edge":0,"from":0}
 ```
+
+- `BuildTrack` builds one 300 m grid segment (cost 20) from node `from` in
+  direction `dir` (0=E 1=W 2=N 3=S 4=NE 5=NW 6=SE 7=SW, ADR 0015).
+- `BuildSignal` places an automatic block-section signal (cost 50) on edge
+  `edge`, protecting the direction from endpoint `from`.
 
 ## Roadmap (phases — see DESIGN.md)
 

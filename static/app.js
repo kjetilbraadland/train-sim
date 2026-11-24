@@ -41,8 +41,10 @@ grid.position.set(900, 0.1, 800);
 scene.add(grid);
 
 // ---------- world objects ----------
-const world = { map: null, edgeMeshes: new Map(), nodeMeshes: new Map(),
-                cityMeshes: new Map(), signalMeshes: new Map(), trainMeshes: new Map() };
+const world = { map: null, mapSig: null, edgeMeshes: new Map(), nodeMeshes: new Map(), cityMeshes: new Map(), signalMeshes: new Map(), trainMeshes: new Map() };
+
+// Map node (x, y) -> three.js position (y becomes z, height 2).
+const nodePos = n => new THREE.Vector3(n.pos[0], 2, n.pos[1]);
 
 // ---------- model loading ----------
 const gltf = new GLTFLoader();
@@ -119,7 +121,7 @@ function clearWorld() {
 // Build static geometry from the map (called once per NewGame).
 function buildMap(map) {
   clearWorld();
-  world.map = map;
+  // edges
   const nodePos = id => {
     const n = map.nodes.find(n => n.id === id);
     return new THREE.Vector3(n.pos[0], 2, n.pos[1]);
@@ -160,13 +162,12 @@ function buildMap(map) {
   }
 
   for (const n of map.nodes) {
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(8, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0x5a5248, roughness: 1 })
-    );
-    mesh.position.set(n.pos[0], 2, n.pos[1]);
-    scene.add(mesh);
-    world.nodeMeshes.set(n.id, mesh);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x5a5248, roughness: 1 });
+    const m = new THREE.Mesh(new THREE.SphereGeometry(8, 14, 10), mat);
+    m.position.set(n.pos[0], 2, n.pos[1]);
+    m.userData.tag = { kind: 'node', id: n.id };
+    scene.add(m);
+    world.nodeMeshes.set(n.id, m);
   }
 
   for (const c of map.cities) {
@@ -225,7 +226,15 @@ function buildMap(map) {
 let lastState = null;
 function updateState(s) {
   lastState = s;
-  if (!world.map || world.map.id !== s.map.id) buildMap(s.map);
+  // Rebuild the map when the graph changes: player-built track adds nodes
+  // and edges with new ids, while the map id itself never changes.
+  const sig = s.map.nodes.map(n => n.id).join(',') + '|' + s.map.edges.map(e => e.id).join(',');
+  if (!world.map || world.mapSig !== sig) {
+    clearGhosts();
+    buildMap(s.map);
+    world.map = s.map;
+    world.mapSig = sig;
+  }
 
   // Signals
   for (const sig of s.signals) {
@@ -270,12 +279,14 @@ function updateState(s) {
   for (const t of s.trains) {
     let m = world.trainMeshes.get(t.id);
     if (!m) {
-      m = new THREE.Group();
-      spawnModel('/models/train.glb', m);
+      const model = new THREE.Group();
+      spawnModel('/models/train.glb', model);
+      m = model;
       const lbl = makeLabel();
       lbl.position.y = 14;
       m.add(lbl);
       m.userData.label = lbl;
+      m.userData.tag = { kind: 'train', id: t.id };
       scene.add(m);
       world.trainMeshes.set(t.id, m);
     }
@@ -302,6 +313,12 @@ function updateState(s) {
       `${parts.length ? parts.join('   ') : '— empty —'}   ${loaded}/${t.capacity}`
     );
   }
+
+  // Drop meshes for trains/signals that no longer exist (e.g. after NewGame).
+  for (const [id, mesh] of world.trainMeshes)
+    if (!s.trains.some(t => t.id === id)) { mesh.removeFromParent(); world.trainMeshes.delete(id); }
+  for (const [id, mesh] of world.signalMeshes)
+    if (!s.signals.some(x => x.id === id)) { mesh.removeFromParent(); world.signalMeshes.delete(id); }
 
   // HUD
   const st = s;
@@ -338,7 +355,7 @@ document.getElementById('btn-speed').onclick = () => {
   cmd({ type: 'SetSpeed', multiplier: speed });
   document.getElementById('btn-speed').textContent = `Speed ${speed}x`;
 };
-document.getElementById('btn-reset').onclick = () => cmd({ type: 'NewGame', map_id: null });
+document.getElementById('btn-reset').onclick = () => { setMode('select'); cmd({ type: 'NewGame', map_id: null }); };
 document.getElementById('btn-loop').onclick = () => {
   // The engine parks a train forever when its route is exhausted. Give the
   // train a multi-lap out-and-back route along the north line so it keeps
@@ -375,3 +392,266 @@ renderer.setAnimationLoop(() => {
   controls.update();
   renderer.render(scene, camera);
 });
+
+// ---------- build & route UI ----------
+const ui = {
+  mode: 'select',   // select | track | signal | train | route
+  buildFrom: null,  // anchor node id for track/signal ghosts
+  ghosts: null,     // THREE.Group of ghost previews
+  routeTrain: null, // selected train id (route mode)
+  route: [],        // node ids, starting at the train's node
+  routeLine: null,  // route preview group
+};
+
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+
+const MODE_HINTS = {
+  select: 'Pick a tool above, then click the map · Esc cancels',
+  track: 'Track: click a node, then a green direction to lay 300 m track (20)',
+  signal: 'Signal: click a node, then a green neighbour to place a signal (50)',
+  train: 'Train: click any node to buy a train there (200)',
+  route: 'Route: click a train, then track nodes; Confirm sends the plan',
+};
+
+function setHint(text) { document.getElementById('hint').textContent = text; }
+
+function setMode(mode) {
+  ui.mode = mode;
+  clearGhosts();
+  if (mode !== 'route') { ui.routeTrain = null; ui.route = []; clearRoutePreview(); }
+  document.querySelectorAll('#hud button[data-mode]').forEach(b =>
+    b.classList.toggle('mode-active', b.dataset.mode === mode));
+  const rc = mode === 'route';
+  document.getElementById('btn-route-confirm').hidden = !rc;
+  document.getElementById('btn-route-clear').hidden = !rc;
+  setHint(MODE_HINTS[mode]);
+  updateModeStatus();
+}
+
+function updateModeStatus() {
+  let t = `Mode: ${ui.mode}`;
+  if (ui.mode === 'route')
+    t += ui.routeTrain == null
+      ? ' — click a train'
+      : ` — train ${ui.routeTrain} · ${ui.route.length} node${ui.route.length === 1 ? '' : 's'}`;
+  document.getElementById('mode-status').textContent = t;
+}
+
+document.querySelectorAll('#hud button[data-mode]').forEach(b =>
+  b.onclick = () => setMode(ui.mode === b.dataset.mode ? 'select' : b.dataset.mode));
+
+addEventListener('keydown', ev => { if (ev.key === 'Escape') setMode('select'); });
+
+// -- ghost previews --------------------------------------------------------
+function clearGhosts() {
+  if (ui.ghosts) {
+    scene.remove(ui.ghosts);
+    ui.ghosts.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    ui.ghosts = null;
+  }
+  ui.buildFrom = null;
+}
+
+// Mirrors engine::map::grid_dir_step (ADR 0004 / 0015): 0=E 1=W 2=N 3=S
+// 4=NE 5=NW 6=SE 7=SW; diagonals move 300 m per axis.
+function gridStep(dir) {
+  const m = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]][dir];
+  return m ? [m[0] * 300, m[1] * 300] : null;
+}
+
+function nodeById(id) { return world.map?.nodes?.find(n => n.id === id); }
+
+function nearNode(pos, eps = 25) {
+  return world.map?.nodes.find(n => Math.hypot(n.pos[0] - pos[0], n.pos[1] - pos[1]) <= eps);
+}
+
+function ghostMaterial(ok) {
+  return new THREE.MeshBasicMaterial({ color: ok ? 0x44cc66 : 0x885533, transparent: true, opacity: 0.45 });
+}
+
+function showTrackGhosts(nodeId) {
+  clearGhosts();
+  const from = nodeById(nodeId);
+  if (!from) return;
+  const fp = nodePos(from);
+  const g = new THREE.Group();
+  for (let d = 0; d < 8; d++) {
+    const st = gridStep(d);
+    if (!st) continue;
+    const tp = new THREE.Vector3(fp.x + st[0], 2, fp.z + st[1]);
+    const near = nearNode([fp.x + st[0], fp.z + st[1]]);
+    const edgeExists = near && world.map.edges.some(
+      e => (e.a === nodeId && e.b === near.id) || (e.b === nodeId && e.a === near.id));
+    const ok = !edgeExists;
+    const grp = new THREE.Group();
+    grp.userData.tag = { kind: 'ghost-track', dir: d, ok };
+    const bed = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, fp.distanceTo(tp), 10), ghostMaterial(ok));
+    bed.position.copy(fp).lerp(tp, 0.5);
+    bed.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tp.clone().sub(fp).normalize());
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(8, 12, 8), ghostMaterial(ok));
+    cap.position.copy(tp);
+    grp.add(bed, cap);
+    g.add(grp);
+  }
+  scene.add(g);
+  ui.ghosts = g;
+  ui.buildFrom = nodeId;
+}
+
+function showSignalGhosts(nodeId) {
+  clearGhosts();
+  const from = nodeById(nodeId);
+  if (!from) return;
+  const fp = nodePos(from);
+  const g = new THREE.Group();
+  for (const e of world.map.edges) {
+    if (e.a !== nodeId && e.b !== nodeId) continue;
+    const toId = e.a === nodeId ? e.b : e.a;
+    const to = nodeById(toId);
+    if (!to) continue;
+    const tp = nodePos(to);
+    // A block-section signal sits ~9 m beside the `from` end, facing `to`.
+    const dir3 = tp.clone().sub(fp).normalize();
+    const perp = new THREE.Vector3(-dir3.z, 0, dir3.x);
+    const already = lastState?.signals?.some(
+      s => s.edge === e.id && s.from === nodeId && s.to === toId);
+    const grp = new THREE.Group();
+    grp.userData.tag = { kind: 'ghost-signal', edge: e.id, ok: !already };
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(3, 12, 8), ghostMaterial(!already));
+    lamp.position.copy(fp).add(perp.multiplyScalar(9));
+    lamp.position.setY(5);
+    grp.add(lamp);
+    g.add(grp);
+  }
+  scene.add(g);
+  ui.ghosts = g;
+  ui.buildFrom = nodeId;
+}
+
+// -- picking ---------------------------------------------------------------
+let downXY = null;
+renderer.domElement.addEventListener('pointerdown', ev => { downXY = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('pointerup', ev => {
+  if (ev.button !== 0 || !downXY) return;
+  const moved = Math.hypot(ev.clientX - downXY[0], ev.clientY - downXY[1]);
+  downXY = null;
+  if (moved > 6) return; // camera drag, not a click
+  handleClick(pick(ev));
+});
+
+function pick(ev) {
+  pointerNdc.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointerNdc, camera);
+  const targets = [...world.nodeMeshes.values(), ...world.trainMeshes.values()];
+  if (ui.ghosts) targets.push(ui.ghosts);
+  for (const h of raycaster.intersectObjects(targets, true)) {
+    let o = h.object;
+    while (o && !o.userData?.tag) o = o.parent;
+    if (o) return o.userData.tag;
+  }
+  return null;
+}
+
+function handleClick(tag) {
+  if (!tag) {
+    if (ui.mode === 'track' || ui.mode === 'signal') clearGhosts();
+    return;
+  }
+  switch (tag.kind) {
+    case 'node': return onNodeClick(tag.id);
+    case 'train': return onTrainClick(tag.id);
+    case 'ghost-track':
+      if (!tag.ok) return;
+      cmd({ type: 'BuildTrack', from: ui.buildFrom, dir: tag.dir });
+      clearGhosts();
+      setHint('Built a 300 m track segment (−20)');
+      return;
+    case 'ghost-signal':
+      if (!tag.ok) return;
+      cmd({ type: 'BuildSignal', edge: tag.edge, from: ui.buildFrom });
+      clearGhosts();
+      setHint('Placed a block-section signal (−50)');
+      return;
+  }
+}
+
+function onNodeClick(nodeId) {
+  if (ui.mode === 'track') {
+    if (ui.buildFrom === nodeId) return clearGhosts();
+    showTrackGhosts(nodeId);
+    setHint(`Anchor node ${nodeId} — click a green direction (Esc cancels)`);
+  } else if (ui.mode === 'signal') {
+    showSignalGhosts(nodeId);
+    setHint(`Anchor node ${nodeId} — click a green neighbour (Esc cancels)`);
+  } else if (ui.mode === 'train') {
+    cmd({ type: 'BuyTrain', node: nodeId });
+    setHint(`Sent: buy train at node ${nodeId} (200)`);
+  } else if (ui.mode === 'route') {
+    if (ui.routeTrain == null) return setHint('Click a train first to start the route');
+    if (ui.route[ui.route.length - 1] !== nodeId) {
+      ui.route.push(nodeId);
+      updateModeStatus();
+      rebuildRoutePreview();
+    }
+  }
+}
+
+function onTrainClick(trainId) {
+  if (ui.mode !== 'route') return;
+  const t = lastState?.trains?.find(x => x.id === trainId);
+  if (!t) return;
+  ui.routeTrain = trainId;
+  ui.route = [t.node];
+  updateModeStatus();
+  rebuildRoutePreview();
+  setHint(`Train ${trainId} selected — click track nodes, then Confirm`);
+}
+
+// -- route preview ---------------------------------------------------------
+function clearRoutePreview() {
+  if (ui.routeLine) {
+    scene.remove(ui.routeLine);
+    ui.routeLine.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    ui.routeLine = null;
+  }
+}
+
+function rebuildRoutePreview() {
+  clearRoutePreview();
+  if (ui.route.length < 2) return;
+  const g = new THREE.Group();
+  for (let i = 0; i + 1 < ui.route.length; i++) {
+    const a = nodeById(ui.route[i]), b = nodeById(ui.route[i + 1]);
+    if (!a || !b) continue;
+    const pa = nodePos(a), pb = nodePos(b);
+    const linked = world.map.edges.some(
+      e => (e.a === a.id && e.b === b.id) || (e.b === a.id && e.a === b.id));
+    g.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([pa.clone().setY(9), pb.clone().setY(9)]),
+      new THREE.LineBasicMaterial({ color: linked ? 0x44ff88 : 0xff5544 })));
+  }
+  scene.add(g);
+  ui.routeLine = g;
+}
+
+document.getElementById('btn-route-confirm').onclick = () => {
+  const t = lastState?.trains?.find(x => x.id === ui.routeTrain);
+  if (!t) return;
+  // The train may have moved since we started; the engine requires the route
+  // to start at its current node, so re-anchor it.
+  const route = [t.node];
+  for (const n of ui.route) if (n !== route[route.length - 1]) route.push(n);
+  if (route.length < 2) return setHint('Route needs at least one hop');
+  cmd({ type: 'SetRoute', train_id: ui.routeTrain, route });
+  setMode('select');
+  setHint(`Sent route for train ${t.id} (${route.length} nodes)`);
+};
+
+document.getElementById('btn-route-clear').onclick = () => {
+  ui.routeTrain = null;
+  ui.route = [];
+  clearRoutePreview();
+  updateModeStatus();
+};
+

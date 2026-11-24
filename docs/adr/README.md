@@ -54,3 +54,4 @@ against it. To change a decision, write a new ADR that supersedes the old one
 | [0012](0012-once-per-stop-auto-trade.md) | Auto-trade is once-per-stop, gated by `traded_at` | Accepted |
 | [0013](0013-fixed-train-speed.md) | Train speed is fixed (no speed upgrade) | Accepted |
 | [0014](0014-no-train-cap.md) | No train cap (train count limited only by money) | Accepted |
+| [0015](0015-grid-build-commands.md) | Grid build commands: BuildTrack / BuildSignal | Accepted |

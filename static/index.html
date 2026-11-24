@@ -5,53 +5,128 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Train Logistics Puzzle</title>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f14; font-family: system-ui, sans-serif; }
-    #hud { position: absolute; top: 12px; left: 12px; color: #cfe3ff; z-index: 10;
-           background: rgba(10,16,24,.75); padding: 10px 14px; border-radius: 10px;
-           font-size: 14px; line-height: 1.5; min-width: 220px; pointer-events: none; }
-    #hud h1 { font-size: 16px; margin: 0 0 6px; }
-    #hud .row { display: flex; justify-content: space-between; gap: 16px; }
-    #hud button { margin-top: 8px; margin-right: 6px; padding: 4px 10px; border: 0; border-radius: 6px;
-                 background: #2b6cb0; color: #fff; cursor: pointer; pointer-events: auto; }
-    #hud button:hover { background: #3182ce; }
-    #hud button.mode-active { background: #2f9e44; }
-    #hint { position: absolute; bottom: 12px; left: 12px; color: #8aa2c0; font-size: 12px; z-index: 10;
-            background: rgba(10,16,24,.6); padding: 6px 10px; border-radius: 8px; pointer-events: none; }
+    :root {
+      --bg: #0b0f14;
+      --panel: rgba(10, 16, 24, .78);
+      --panel-solid: rgba(10, 16, 24, .92);
+      --border: rgba(120, 160, 220, .16);
+      --text: #cfe3ff;
+      --dim: #8aa2c0;
+      --accent: #2b6cb0;
+      --accent-h: #3d82cc;
+      --good: #2f9e44;
+      --gold: #ffd9a0;
+      --radius: 10px;
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg);
+      font-family: system-ui, sans-serif; user-select: none; }
     canvas { display: block; }
+
+    .panel { position: absolute; z-index: 10; background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); backdrop-filter: blur(6px); }
+
+    /* top-left: status */
+    #status { top: 12px; left: 12px; padding: 10px 14px; min-width: 180px; pointer-events: none; }
+    #status h1 { font-size: 14px; margin: 0 0 8px; letter-spacing: .06em; font-weight: 700; }
+    #status .row { display: flex; justify-content: space-between; gap: 18px; font-size: 13px; line-height: 1.7; }
+    #status .row span { color: var(--dim); }
+    #status b { font-variant-numeric: tabular-nums; }
+    #status #money { color: var(--gold); }
+    #status #score { color: #7dd3fc; }
+    #status #tick { color: var(--dim); font-size: 11px; }
+
+    /* top-right: menu */
+    #menu { top: 12px; right: 12px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; }
+    .btn { padding: 6px 12px; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--accent); color: #fff; cursor: pointer; font-size: 13px; transition: background .12s; }
+    .btn:hover { background: var(--accent-h); }
+    .btn.ghost { background: transparent; color: var(--dim); }
+    .btn.ghost:hover { color: var(--text); background: rgba(120, 160, 220, .1); }
+    .btn.paused { background: var(--good); }
+
+    /* bottom-center: tool hotbar */
+    #hotbar { bottom: 14px; left: 50%; transform: translateX(-50%); padding: 8px 10px; display: flex; gap: 8px; }
+    .tool { position: relative; width: 132px; padding: 8px 10px 9px; border: 1px solid var(--border);
+      border-radius: 8px; background: rgba(20, 30, 44, .6); color: var(--text); cursor: pointer;
+      text-align: left; font-size: 13px; transition: background .12s, border-color .12s; }
+    .tool:hover { background: rgba(43, 108, 176, .35); }
+    .tool.active { background: rgba(47, 158, 68, .28); border-color: var(--good); }
+    .tool .key { position: absolute; top: 5px; right: 7px; font-size: 10px; color: var(--dim);
+      border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+    .tool .cost { margin-left: 6px; font-size: 11px; color: var(--gold); }
+    .tool .name { font-weight: 600; }
+    .tool .desc { display: block; margin-top: 2px; font-size: 10.5px; color: var(--dim); }
+
+    /* bottom-right: context */
+    #context { bottom: 14px; right: 12px; padding: 8px 12px; pointer-events: none; max-width: 430px; text-align: right; }
+    #context .mode { font-size: 12.5px; color: var(--dim); }
+    #context .mode b { color: var(--text); }
+    #context .hint { margin-top: 3px; font-size: 11.5px; color: var(--dim); }
+    #context .route-actions { display: none; gap: 8px; margin-top: 6px; justify-content: flex-end; pointer-events: auto; }
+    #context.route .route-actions { display: flex; }
+
+    /* toasts */
+    #toasts { top: 86px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column;
+      gap: 6px; align-items: center; pointer-events: none; z-index: 20; }
+    .toast { padding: 7px 16px; border-radius: 20px; font-size: 13px; white-space: nowrap;
+      background: var(--panel-solid); border: 1px solid var(--border); color: var(--text);
+      animation: toast-in .18s ease-out; }
+    .toast.good { border-color: rgba(47, 158, 68, .6); color: #b2f2bb; }
+    .toast.bad { border-color: rgba(201, 42, 42, .6); color: #ffc9c9; }
+    .toast.gold { border-color: rgba(255, 217, 160, .5); color: var(--gold); }
+    .toast.out { opacity: 0; transform: translateY(-8px); transition: all .3s; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } }
+
+    /* hover detail */
+    #detail { top: 158px; left: 12px; padding: 10px 14px; min-width: 180px; display: none; pointer-events: none; }
+    #detail.show { display: block; }
+    #detail h3 { margin: 0 0 6px; font-size: 13px; }
+    #detail .row { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; line-height: 1.7; }
+    #detail .row span { color: var(--dim); }
   </style>
 </head>
 <body>
-  <div id="hud">
-    <h1>🚂 Train Logistics</h1>
-    <div class="row"><span>Tick</span><b id="tick">0</b></div>
-    <div class="row"><span>Score</span><b id="score">0</b></div>
+  <!-- top-left: status -->
+  <div id="status" class="panel">
+    <h1>🚂 TRAIN LOGISTICS</h1>
     <div class="row"><span>Money</span><b id="money">0</b></div>
+    <div class="row"><span>Score</span><b id="score">0</b></div>
     <div class="row"><span>Signals</span><b id="signals">–</b></div>
-    <div>
-      <button id="btn-pause">Pause</button>
-      <button id="btn-speed">Speed 1x</button>
-      <button id="btn-reset">New game</button>
-      <button id="btn-loop">Loop route</button>
-    </div>
-    <div style="display:flex;gap:6px;margin-top:6px">
-      <button id="btn-buy-train">Buy train (200)</button>
-      <button id="btn-route">Route A→B</button>
-    </div>
-    <div style="display:flex;gap:6px;margin-top:6px">
-      <button id="btn-mode-track" data-mode="track">Build track (20)</button>
-      <button id="btn-mode-signal" data-mode="signal">Build signal (50)</button>
-    </div>
-    <div style="display:flex;gap:6px;margin-top:6px">
-      <button id="btn-mode-train" data-mode="train">Train at node</button>
-      <button id="btn-mode-route" data-mode="route">Plan route</button>
-    </div>
-    <div style="display:flex;gap:6px;margin-top:6px">
-      <button id="btn-route-confirm" hidden>Confirm route</button>
-      <button id="btn-route-clear" hidden>Clear</button>
-    </div>
-    <div id="mode-status" style="margin-top:8px;color:#8aa2c0;font-size:13px">Mode: select</div>
+    <div class="row"><span>Tick</span><b id="tick">0</b></div>
   </div>
-  <div id="hint">Pick a tool above, then click the map · Esc cancels</div>
+
+  <!-- top-right: menu -->
+  <div id="menu" class="panel">
+    <button class="btn" id="btn-pause">Pause</button>
+    <button class="btn" id="btn-speed">Speed 1x</button>
+    <button class="btn ghost" id="btn-loop">Loop route</button>
+    <button class="btn ghost" id="btn-reset">New game</button>
+  </div>
+
+  <!-- bottom-center: tool hotbar -->
+  <div id="hotbar" class="panel">
+    <button class="tool" data-mode="track"><span class="key">1</span><span class="name">Build track</span><span class="cost">20</span><span class="desc">node → green direction</span></button>
+    <button class="tool" data-mode="signal"><span class="key">2</span><span class="name">Build signal</span><span class="cost">50</span><span class="desc">node → green neighbour</span></button>
+    <button class="tool" data-mode="train"><span class="key">3</span><span class="name">Buy train</span><span class="cost">200</span><span class="desc">click any node</span></button>
+    <button class="tool" data-mode="route"><span class="key">4</span><span class="name">Plan route</span><span class="desc">train → nodes → confirm</span></button>
+  </div>
+
+  <!-- bottom-right: context -->
+  <div id="context" class="panel">
+    <div class="mode" id="mode-status">Mode: <b>select</b></div>
+    <div class="hint" id="hint">Pick a tool (1–4), then click the map · Esc cancels</div>
+    <div class="route-actions">
+      <button class="btn" id="btn-route-confirm">Confirm route</button>
+      <button class="btn ghost" id="btn-route-clear">Clear</button>
+    </div>
+  </div>
+
+  <!-- toasts + hover detail -->
+  <div id="toasts"></div>
+  <div id="detail" class="panel">
+    <h3 id="detail-title"></h3>
+    <div id="detail-rows"></div>
+  </div>
   <script type="importmap">
     { "imports": { "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
                   "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/" } }

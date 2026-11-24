@@ -225,7 +225,9 @@ function buildMap(map) {
 // ---------- dynamic update (per snapshot) ----------
 let lastState = null;
 function updateState(s) {
+  const prev = lastState;
   lastState = s;
+  if (prev && s.money > prev.money) onDelivery(s, prev, s.money - prev.money);
   // Rebuild the map when the graph changes: player-built track adds nodes
   // and edges with new ids, while the map id itself never changes.
   const sig = s.map.nodes.map(n => n.id).join(',') + '|' + s.map.edges.map(e => e.id).join(',');
@@ -323,11 +325,127 @@ function updateState(s) {
   // HUD
   const st = s;
   document.getElementById('tick').textContent = st.tick;
-  document.getElementById('score').textContent = st.score;
-  document.getElementById('money').textContent = st.money;
+  setTween(document.getElementById('score'), st.score);
+  setTween(document.getElementById('money'), st.money);
   const green = st.signals.filter(x => x.green).length;
   const red = st.signals.length - green;
   document.getElementById('signals').textContent = `${green}g / ${red}r`;
+}
+
+// ---------- feedback: toasts, sound, floating text ----------
+const toastsEl = document.getElementById('toasts');
+function toast(msg, kind = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  toastsEl.appendChild(el);
+  while (toastsEl.children.length > 4) toastsEl.firstChild.remove();
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 350);
+  }, 2400);
+}
+
+// Tiny synthesized blips (no audio assets). Context is created lazily on the
+// first user gesture to satisfy browser autoplay policy.
+const sfx = {
+  ctx: null,
+  ensure() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) this.ctx = new AC();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    return this.ctx;
+  },
+  tone(freq, dur, type, vol, delay = 0) {
+    const c = this.ensure();
+    if (!c) return;
+    const t0 = c.currentTime + delay;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g);
+    g.connect(c.destination);
+    o.start(t0);
+    o.stop(t0 + dur + 0.05);
+  },
+  click() { this.tone(660, 0.07, 'triangle', 0.1); },
+  build() { this.tone(520, 0.09, 'sine', 0.14); this.tone(780, 0.12, 'sine', 0.11, 0.07); },
+  error() { this.tone(180, 0.18, 'square', 0.07); },
+  cash() { this.tone(660, 0.09, 'sine', 0.13); this.tone(880, 0.09, 'sine', 0.13, 0.08); this.tone(1100, 0.16, 'sine', 0.11, 0.16); },
+};
+renderer.domElement.addEventListener('pointerdown', () => sfx.ensure(), { once: true });
+
+function rejectBuild() { sfx.error(); toast('Not enough funds', 'bad'); }
+const COSTS = { track: 20, signal: 50, train: 200 };
+function canAfford(cost) {
+  if (lastState && lastState.money < cost) { rejectBuild(); return false; }
+  return true;
+}
+
+let deliveryCount = 0;
+function onDelivery(s, prev, delta) {
+  deliveryCount += 1;
+  sfx.cash();
+  const scoreDelta = s.score - prev.score;
+  toast(`+${delta} funds · delivery complete${scoreDelta > 0 ? ` · +${scoreDelta} score` : ''}`, 'gold');
+  // Pop a floating +N above the station the train just unloaded at.
+  const t = s.trains.find(t => t.edge == null && s.map.cities.some(c => c.station === t.node));
+  const n = t && s.map.nodes.find(n => n.id === t.node);
+  if (n) addFloatText(new THREE.Vector3(n.pos[0], 14, n.pos[1]), `+${delta}`);
+}
+
+// Floating world text: rises and fades over ~1.3 s.
+const floatTexts = [];
+function addFloatText(pos, text, color = '#ffd9a0') {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.font = 'bold 34px system-ui';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 64, 32);
+  const tex = new THREE.CanvasTexture(c);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  spr.scale.set(40, 20, 1);
+  spr.position.copy(pos);
+  scene.add(spr);
+  floatTexts.push({ spr, t: 0 });
+}
+function updateFloatTexts(dt) {
+  for (let i = floatTexts.length - 1; i >= 0; i--) {
+    const f = floatTexts[i];
+    f.t += dt / 1.3;
+    f.spr.position.y += dt * 35;
+    f.spr.material.opacity = Math.max(0, 1 - f.t);
+    if (f.t >= 1) {
+      scene.remove(f.spr);
+      f.spr.material.map.dispose();
+      f.spr.material.dispose();
+      floatTexts.splice(i, 1);
+    }
+  }
+}
+
+// Tween displayed counters (money/score) to their target values.
+const tweens = new Map();
+function setTween(el, target) {
+  const cur = parseFloat(el.textContent) || 0;
+  if (cur === target) { el.textContent = String(target); return; }
+  tweens.set(el, { from: cur, to: target, t: 0 });
+}
+function updateTween(dt) {
+  for (const [el, w] of tweens) {
+    w.t = Math.min(1, w.t + dt / 0.4);
+    const e = 1 - Math.pow(1 - w.t, 3);
+    el.textContent = String(Math.round(w.from + (w.to - w.from) * e));
+    if (w.t >= 1) tweens.delete(el);
+  }
 }
 
 // ---------- websocket ----------
@@ -348,7 +466,9 @@ let paused = false, speed = 1;
 document.getElementById('btn-pause').onclick = () => {
   paused = !paused;
   cmd({ type: 'SetPaused', paused });
-  document.getElementById('btn-pause').textContent = paused ? 'Resume' : 'Pause';
+  const b = document.getElementById('btn-pause');
+  b.textContent = paused ? 'Resume' : 'Pause';
+  b.classList.toggle('paused', paused);
 };
 document.getElementById('btn-speed').onclick = () => {
   speed = speed >= 4 ? 1 : speed * 2;
@@ -370,17 +490,6 @@ document.getElementById('btn-loop').onclick = () => {
   for (let l = 0; l < 8; l++) route.push(...lap);
   cmd({ type: 'SetRoute', train_id: t.id, route });
 };
-document.getElementById('btn-buy-train').onclick = () => {
-  // Buy a train at node 0 (City A's station). Cost 200 (economy v1).
-  // The server rejects with a log warning if funds are insufficient.
-  cmd({ type: 'BuyTrain', node: 0 });
-};
-document.getElementById('btn-route').onclick = () => {
-  // Assign the first train the route A(0) -> B(3). Server rejects if no
-  // train exists yet (buy one first).
-  cmd({ type: 'SetRoute', train_id: 1, route: [0, 1, 2, 3] });
-};
-
 // ---------- loop ----------
 connect();
 addEventListener('resize', () => {
@@ -388,8 +497,14 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+let lastFrame = performance.now();
 renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastFrame) / 1000);
+  lastFrame = now;
   controls.update();
+  updateFloatTexts(dt);
+  updateTween(dt);
   renderer.render(scene, camera);
 });
 
@@ -420,28 +535,97 @@ function setMode(mode) {
   ui.mode = mode;
   clearGhosts();
   if (mode !== 'route') { ui.routeTrain = null; ui.route = []; clearRoutePreview(); }
-  document.querySelectorAll('#hud button[data-mode]').forEach(b =>
-    b.classList.toggle('mode-active', b.dataset.mode === mode));
-  const rc = mode === 'route';
-  document.getElementById('btn-route-confirm').hidden = !rc;
-  document.getElementById('btn-route-clear').hidden = !rc;
+  document.querySelectorAll('#hotbar .tool').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  document.getElementById('context').classList.toggle('route', mode === 'route');
   setHint(MODE_HINTS[mode]);
   updateModeStatus();
 }
 
 function updateModeStatus() {
-  let t = `Mode: ${ui.mode}`;
+  let extra = '';
   if (ui.mode === 'route')
-    t += ui.routeTrain == null
+    extra = ui.routeTrain == null
       ? ' — click a train'
       : ` — train ${ui.routeTrain} · ${ui.route.length} node${ui.route.length === 1 ? '' : 's'}`;
-  document.getElementById('mode-status').textContent = t;
+  document.getElementById('mode-status').innerHTML = `Mode: <b>${ui.mode}</b>${extra}`;
 }
 
-document.querySelectorAll('#hud button[data-mode]').forEach(b =>
-  b.onclick = () => setMode(ui.mode === b.dataset.mode ? 'select' : b.dataset.mode));
+document.querySelectorAll('#hotbar .tool').forEach(b =>
+  b.onclick = () => { sfx.click(); setMode(ui.mode === b.dataset.mode ? 'select' : b.dataset.mode); });
 
-addEventListener('keydown', ev => { if (ev.key === 'Escape') setMode('select'); });
+const KEY_MODES = { '1': 'track', '2': 'signal', '3': 'train', '4': 'route' };
+addEventListener('keydown', ev => {
+  if (KEY_MODES[ev.key]) {
+    const m = KEY_MODES[ev.key];
+    sfx.click();
+    setMode(ui.mode === m ? 'select' : m);
+  } else if (ev.key === 'Escape') {
+    setMode('select');
+  } else if (ev.key === ' ') {
+    ev.preventDefault();
+    // Avoid the keyup also activating a focused button (e.g. a hotbar tool).
+    if (document.activeElement?.tagName === 'BUTTON') document.activeElement.blur();
+    document.getElementById('btn-pause').click();
+  } else if (ev.key === 'r' || ev.key === 'R') {
+    document.getElementById('btn-reset').click();
+  }
+});
+
+// -- hover: node highlight + detail panel --------------------------------
+const nodeHighlight = new THREE.Mesh(
+  new THREE.TorusGeometry(12, 1, 8, 32),
+  new THREE.MeshBasicMaterial({ color: 0x9db8e8, transparent: true, opacity: 0.8 })
+);
+nodeHighlight.rotation.x = Math.PI / 2;
+nodeHighlight.visible = false;
+scene.add(nodeHighlight);
+
+const detailEl = document.getElementById('detail');
+const detailTitle = document.getElementById('detail-title');
+const detailRows = document.getElementById('detail-rows');
+function showDetail(title, rows) {
+  detailTitle.textContent = title;
+  detailRows.innerHTML = rows.map(([k, v]) =>
+    `<div class="row"><span>${k}</span><b>${v}</b></div>`).join('');
+  detailEl.classList.add('show');
+}
+function hideDetail() { detailEl.classList.remove('show'); }
+
+renderer.domElement.addEventListener('pointermove', ev => {
+  pointerNdc.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointerNdc, camera);
+  const targets = [...world.nodeMeshes.values(), ...world.trainMeshes.values()];
+  let tag = null;
+  for (const h of raycaster.intersectObjects(targets, true)) {
+    let o = h.object;
+    while (o && !o.userData?.tag) o = o.parent;
+    if (o) { tag = o.userData.tag; break; }
+  }
+  if (tag?.kind === 'node') {
+    const n = nodeById(tag.id);
+    if (n) {
+      nodeHighlight.visible = true;
+      nodeHighlight.position.set(n.pos[0], 3, n.pos[1]);
+    }
+    const edges = world.map.edges.filter(e => e.a === tag.id || e.b === tag.id).length;
+    showDetail(`Node ${tag.id}`, [['Connected edges', edges]]);
+  } else if (tag?.kind === 'train') {
+    nodeHighlight.visible = false;
+    const t = lastState?.trains.find(x => x.id === tag.id);
+    if (t) {
+      const loaded = t.cargo.reduce((a, [, q]) => a + q, 0);
+      const cargo = t.cargo.map(([g, q]) => `${g}×${q}`).join(' ') || '—';
+      showDetail(`Train ${t.id}`, [
+        ['Position', t.edge != null ? `edge ${t.edge}` : `node ${t.node}`],
+        ['Cargo', `${cargo}  (${loaded}/${t.capacity})`],
+      ]);
+    }
+  } else {
+    nodeHighlight.visible = false;
+    hideDetail();
+  }
+});
 
 // -- ghost previews --------------------------------------------------------
 function clearGhosts() {
@@ -563,14 +747,20 @@ function handleClick(tag) {
     case 'train': return onTrainClick(tag.id);
     case 'ghost-track':
       if (!tag.ok) return;
+      if (!canAfford(COSTS.track)) return;
       cmd({ type: 'BuildTrack', from: ui.buildFrom, dir: tag.dir });
       clearGhosts();
+      sfx.build();
+      toast(`−${COSTS.track} funds · track built`);
       setHint('Built a 300 m track segment (−20)');
       return;
     case 'ghost-signal':
       if (!tag.ok) return;
+      if (!canAfford(COSTS.signal)) return;
       cmd({ type: 'BuildSignal', edge: tag.edge, from: ui.buildFrom });
       clearGhosts();
+      sfx.build();
+      toast(`−${COSTS.signal} funds · signal placed`);
       setHint('Placed a block-section signal (−50)');
       return;
   }
@@ -585,7 +775,9 @@ function onNodeClick(nodeId) {
     showSignalGhosts(nodeId);
     setHint(`Anchor node ${nodeId} — click a green neighbour (Esc cancels)`);
   } else if (ui.mode === 'train') {
+    if (!canAfford(COSTS.train)) return;
     cmd({ type: 'BuyTrain', node: nodeId });
+    sfx.build();
     setHint(`Sent: buy train at node ${nodeId} (200)`);
   } else if (ui.mode === 'route') {
     if (ui.routeTrain == null) return setHint('Click a train first to start the route');
@@ -643,6 +835,7 @@ document.getElementById('btn-route-confirm').onclick = () => {
   const route = [t.node];
   for (const n of ui.route) if (n !== route[route.length - 1]) route.push(n);
   if (route.length < 2) return setHint('Route needs at least one hop');
+  sfx.click();
   cmd({ type: 'SetRoute', train_id: ui.routeTrain, route });
   setMode('select');
   setHint(`Sent route for train ${t.id} (${route.length} nodes)`);
@@ -653,5 +846,36 @@ document.getElementById('btn-route-clear').onclick = () => {
   ui.route = [];
   clearRoutePreview();
   updateModeStatus();
+};
+
+// ---------- test hook ----------
+window.__ts = {
+  nodeScreen(id, y = 3) {
+    const n = nodeById(id);
+    const v = new THREE.Vector3(n.pos[0], y, n.pos[1]).project(camera);
+    return { x: (v.x + 1) / 2 * innerWidth, y: (-v.y + 1) / 2 * innerHeight };
+  },
+  ghostScreen(fromId, d) {
+    const f = nodeById(fromId);
+    const st = gridStep(d);
+    const v = new THREE.Vector3(f.pos[0] + st[0], 3, f.pos[1] + st[1]).project(camera);
+    return { x: (v.x + 1) / 2 * innerWidth, y: (-v.y + 1) / 2 * innerHeight };
+  },
+  trainScreen(id, y = 6) {
+    const m = world.trainMeshes.get(id);
+    if (!m) return null;
+    const v = m.position.clone().project(camera);
+    return { x: (v.x + 1) / 2 * innerWidth, y: (-v.y + 1) / 2 * innerHeight };
+  },
+  state: () => lastState,
+  mode: () => ui.mode,
+  ghostDirs() {
+    if (!ui.ghosts) return [];
+    return ui.ghosts.children.map(c => c.userData.tag)
+      .filter(t => t?.kind === 'ghost-track').map(t => ({ dir: t.dir, ok: t.ok }));
+  },
+  cities: () => lastState?.map?.cities?.map(c => ({ id: c.id, name: c.name, station: c.station })) ?? [],
+  floats: () => floatTexts.length,
+  deliveries: () => deliveryCount,
 };
 

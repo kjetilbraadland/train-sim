@@ -143,6 +143,21 @@ fn edge(id: u32, a: u32, b: u32, has_signal: bool) -> Edge {
     Edge { id, a, b, length: 300.0, has_signal }
 }
 
+/// The default signals: one per edge flagged `has_signal` in the default
+/// map, protecting the direction the map author chose. Derived from the map
+/// so `SimState::new_game` can build a full fresh state.
+pub fn default_signals() -> Vec<crate::state::Signal> {
+    use crate::state::Signal;
+    vec![
+        Signal { id: 0, edge: 1, from: 1, to: 2, green: true },
+        Signal { id: 1, edge: 4, from: 4, to: 5, green: true },
+        Signal { id: 2, edge: 6, from: 7, to: 8, green: true },
+        Signal { id: 3, edge: 9, from: 10, to: 11, green: true },
+        Signal { id: 4, edge: 10, from: 2, to: 12, green: true },
+        Signal { id: 5, edge: 13, from: 13, to: 3, green: true },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

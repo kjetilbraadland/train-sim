@@ -353,6 +353,16 @@ document.getElementById('btn-loop').onclick = () => {
   for (let l = 0; l < 8; l++) route.push(...lap);
   cmd({ type: 'SetRoute', train_id: t.id, route });
 };
+document.getElementById('btn-buy-train').onclick = () => {
+  // Buy a train at node 0 (City A's station). Cost 200 (economy v1).
+  // The server rejects with a log warning if funds are insufficient.
+  cmd({ type: 'BuyTrain', node: 0 });
+};
+document.getElementById('btn-route').onclick = () => {
+  // Assign the first train the route A(0) -> B(3). Server rejects if no
+  // train exists yet (buy one first).
+  cmd({ type: 'SetRoute', train_id: 1, route: [0, 1, 2, 3] });
+};
 
 // ---------- loop ----------
 connect();

@@ -21,6 +21,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
 
+use train_sim_engine::command::{self, CmdError};
 use train_sim_engine::{Command, Sim, SimState};
 
 /// One tick per 100 ms of wall time (at 1x speed).
@@ -69,46 +70,10 @@ async fn main() {
     axum::serve(listener, router).await.unwrap();
 }
 
-/// Build a fresh game state with the default map and one starter train.
+/// Build a fresh game state (engine owns the rules: default map, starting
+/// funds, no trains — the player buys the first train, M1).
 fn new_game_state() -> SimState {
-    use train_sim_engine::map::default_map;
-    use train_sim_engine::state::Train;
-    SimState {
-        map: default_map(),
-        trains: vec![Train {
-            id: 0,
-            node: 0,
-            edge: None,
-            progress: 0.0,
-            speed: 15.0,
-            route: vec![0, 1, 2, 3],
-            route_idx: 1,
-            cargo: vec![],
-            capacity: 8,
-            held_by_signal: false,
-            just_arrived: false,
-        }],
-        signals: default_signals(),
-        tick: 0,
-        paused: false,
-        speed: 1.0,
-        score: 0,
-        money: 0,
-        rng_state: 0x5eed,
-    }
-}
-
-fn default_signals() -> Vec<train_sim_engine::state::Signal> {
-    use train_sim_engine::state::Signal;
-    // Signals on the edges flagged has_signal in the default map.
-    vec![
-        Signal { id: 0, edge: 1, from: 1, to: 2, green: true },
-        Signal { id: 1, edge: 4, from: 4, to: 5, green: true },
-        Signal { id: 2, edge: 6, from: 7, to: 8, green: true },
-        Signal { id: 3, edge: 9, from: 10, to: 11, green: true },
-        Signal { id: 4, edge: 10, from: 2, to: 12, green: true },
-        Signal { id: 5, edge: 13, from: 13, to: 3, green: true },
-    ]
+    SimState::new_game()
 }
 
 async fn status_handler(State(app): State<Arc<AppState>>) -> impl IntoResponse {
@@ -145,47 +110,19 @@ async fn handle_ws(socket: WebSocket, app: Arc<AppState>) {
         }
     });
 
-    // Inbound: decode commands, apply to state.
+    // Inbound: decode commands, apply to state (rules live in the engine).
     while let Some(Ok(msg)) = receiver.next().await {
         let Message::Text(text) = msg else { continue };
         let text = text.to_string();
         match serde_json::from_str::<Command>(&text) {
             Ok(cmd) => {
                 let mut state = app.state.write().await;
-                apply_command(&mut state, cmd);
+                if let Err(e) = command::apply(&mut state, &cmd) {
+                    tracing::warn!("rejected command: {e}");
+                }
             }
             Err(e) => tracing::warn!("bad command: {e}"),
         }
     }
     out.abort();
-}
-
-fn apply_command(state: &mut SimState, cmd: Command) {
-    match cmd {
-        Command::NewGame { map_id: _ } => {
-            *state = new_game_state();
-        }
-        Command::SetPaused { paused } => state.paused = paused,
-        Command::SetSpeed { multiplier } => state.speed = multiplier.clamp(0.25, 8.0),
-        Command::SetRoute { train_id, route } => {
-            if let Some(t) = state.trains.iter_mut().find(|t| t.id == train_id) {
-                t.route = route;
-                t.route_idx = 1; // route[0] is the starting node
-            }
-        }
-        Command::Load { train_id, good, qty } => {
-            if let Some(t) = state.trains.iter_mut().find(|t| t.id == train_id) {
-                let space = t.capacity - t.cargo_total();
-                let q = qty.min(space);
-                t.set_cargo(good, t.cargo_qty(good) + q);
-            }
-        }
-        Command::Unload { train_id, good, qty } => {
-            if let Some(t) = state.trains.iter_mut().find(|t| t.id == train_id) {
-                let have = t.cargo_qty(good);
-                let q = qty.min(have);
-                t.set_cargo(good, have - q);
-            }
-        }
-    }
 }

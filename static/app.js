@@ -164,7 +164,9 @@ function buildMap(map) {
 }
 
 // ---------- dynamic update (per snapshot) ----------
+let lastState = null;
 function updateState(s) {
+  lastState = s;
   if (!world.map || world.map.id !== s.map.id) buildMap(s.map);
 
   // Signals
@@ -248,6 +250,20 @@ document.getElementById('btn-speed').onclick = () => {
   document.getElementById('btn-speed').textContent = `Speed ${speed}x`;
 };
 document.getElementById('btn-reset').onclick = () => cmd({ type: 'NewGame', map_id: null });
+document.getElementById('btn-loop').onclick = () => {
+  // The engine parks a train forever when its route is exhausted. Give the
+  // train a multi-lap out-and-back route along the north line so it keeps
+  // running (and auto-trading) instead of stopping.
+  const t = lastState?.trains[0];
+  if (!t) return;
+  const circuit = [0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0];
+  let i = circuit.indexOf(t.node);
+  if (i < 0) i = 0;
+  const lap = circuit.slice(i).concat(circuit.slice(0, i + 1));
+  const route = [];
+  for (let l = 0; l < 8; l++) route.push(...lap);
+  cmd({ type: 'SetRoute', train_id: t.id, route });
+};
 
 // ---------- loop ----------
 connect();

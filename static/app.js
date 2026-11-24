@@ -105,20 +105,41 @@ function buildMap(map) {
   for (const e of map.edges) {
     const a = nodePos(e.a), b = nodePos(e.b);
     const len = a.distanceTo(b);
-    const mesh = new THREE.Mesh(
+    const g = new THREE.Group();
+
+    // Raised track bed (dark, factorio-style track foundation)
+    g.add(new THREE.Mesh(
       new THREE.CylinderGeometry(4, 4, len, 8),
-      new THREE.MeshStandardMaterial({ color: 0x3a4d63, roughness: 0.8 })
-    );
-    mesh.position.copy(a).add(b).multiplyScalar(0.5).setY(2);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
-    scene.add(mesh);
-    world.edgeMeshes.set(e.id, mesh);
+      new THREE.MeshStandardMaterial({ color: 0x4a4238, roughness: 1 })
+    ));
+
+    // Wooden sleepers on top of the bed
+    const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2a, roughness: 1 });
+    const nS = Math.max(2, Math.floor(len / 15));
+    for (let i = 0; i < nS; i++) {
+      const s = new THREE.Mesh(new THREE.BoxGeometry(9, 1, 1.8), sleeperMat);
+      s.position.y = 4.5 + (-len / 2 + 5 + (i * (len - 10)) / (nS - 1)); // 4.5 = bed top + half sleeper
+      g.add(s);
+    }
+
+    // Two steel rails on top of the sleepers
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x9aa4ad, roughness: 0.4, metalness: 0.6 });
+    for (const side of [-2.2, 2.2]) {
+      const r = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, len), railMat);
+      r.position.set(side, 5.5, 0);
+      g.add(r);
+    }
+
+    g.position.copy(a).add(b).multiplyScalar(0.5).setY(2);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    scene.add(g);
+    world.edgeMeshes.set(e.id, g);
   }
 
   for (const n of map.nodes) {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(8, 12, 12),
-      new THREE.MeshStandardMaterial({ color: 0x6b87a8 })
+      new THREE.MeshStandardMaterial({ color: 0x5a5248, roughness: 1 })
     );
     mesh.position.set(n.pos[0], 2, n.pos[1]);
     scene.add(mesh);
@@ -174,17 +195,38 @@ function updateState(s) {
     let m = world.signalMeshes.get(sig.id);
     if (!m) {
       const from = s.map.nodes.find(n => n.id === sig.from);
-      m = new THREE.Mesh(
-        new THREE.SphereGeometry(10, 12, 12),
-        new THREE.MeshStandardMaterial({ color: 0x22cc44, emissive: 0x22cc44, emissiveIntensity: 0.6 })
+      const to = s.map.nodes.find(n => n.id === sig.to);
+      m = new THREE.Group();
+      // Factorio-style signal: small post beside the track, cube head, glowing lamp.
+      const dir = new THREE.Vector3(to.pos[0] - from.pos[0], 0, to.pos[1] - from.pos[1]).normalize();
+      const side = new THREE.Vector3(-dir.z, 0, dir.x);
+      const pos = new THREE.Vector3(from.pos[0], 0, from.pos[1]).addScaledVector(side, 9);
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.8, 0.8, 9, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.9 })
       );
-      m.position.set(from.pos[0], 25, from.pos[1]);
+      post.position.y = 4.5;
+      m.add(post);
+      const head = new THREE.Mesh(
+        new THREE.BoxGeometry(3, 3, 3),
+        new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.7 })
+      );
+      head.position.y = 9.5;
+      m.add(head);
+      const lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(1.4, 12, 12),
+        new THREE.MeshStandardMaterial({ color: 0x22cc44, emissive: 0x22cc44, emissiveIntensity: 0.9 })
+      );
+      lamp.position.y = 12;
+      m.add(lamp);
+      m.userData.lamp = lamp;
+      m.position.copy(pos);
       scene.add(m);
       world.signalMeshes.set(sig.id, m);
     }
     const col = sig.green ? 0x22cc44 : 0xcc2222;
-    m.material.color.setHex(col);
-    m.material.emissive.setHex(col);
+    m.userData.lamp.material.color.setHex(col);
+    m.userData.lamp.material.emissive.setHex(col);
   }
 
   // Trains

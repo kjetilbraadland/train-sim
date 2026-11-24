@@ -85,6 +85,29 @@ function labelSprite(text, color = '#cfe3ff', scale = 60) {
   return spr;
 }
 
+// A sprite whose text can be redrawn in place (used for the cargo manifest).
+function makeLabel() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const ctx = c.getContext('2d');
+  const tex = new THREE.CanvasTexture(c);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+  spr.scale.set(48, 12, 1);
+  let last = null;
+  spr.setText = txt => {
+    if (txt === last) return;
+    last = txt;
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.font = 'bold 30px system-ui';
+    ctx.fillStyle = '#ffd9a0';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(txt, 128, 32);
+    tex.needsUpdate = true;
+  };
+  return spr;
+}
+
 function clearWorld() {
   for (const m of [...world.edgeMeshes.values(), ...world.nodeMeshes.values(),
                    ...world.cityMeshes.values(), ...world.signalMeshes.values(),
@@ -148,34 +171,48 @@ function buildMap(map) {
 
   for (const c of map.cities) {
     const g = new THREE.Group();
+    // Flat gray concrete pad (Factorio-style ground)
     const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(40, 48, 16, 24),
-      new THREE.MeshStandardMaterial({ color: 0x2b6cb0 })
+      new THREE.BoxGeometry(100, 5, 100),
+      new THREE.MeshStandardMaterial({ color: 0x8a887e, roughness: 1 })
     );
-    base.position.y = 8;
+    base.position.y = 2.5;
     g.add(base);
-    // Station model on top of the city block
-    spawnModel('/models/station.glb', g, m => { m.position.set(-28, 16, 0); });
+    // Station model on the pad
+    spawnModel('/models/station.glb', g, m => { m.position.set(-28, 5, 0); });
+    // Factorio-green fence around the station
+    const fenceMat = new THREE.MeshStandardMaterial({ color: 0x5cb85c, roughness: 0.8 });
+    const fs = 14;
+    for (const [dx, dz] of [[-fs, -fs], [fs, -fs], [-fs, fs], [fs, fs]]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 5, 8), fenceMat);
+      post.position.set(-28 + dx, 7.5, dz);
+      g.add(post);
+    }
+    for (const [w, d, px, pz] of [[2 * fs, 1, 0, -fs], [2 * fs, 1, 0, fs], [1, 2 * fs, -fs, 0], [1, 2 * fs, fs, 0]]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, 0.5, d), fenceMat);
+      bar.position.set(-28 + px, 9.8, pz);
+      g.add(bar);
+    }
     // Supply/demand pips
     const pips = new THREE.Group();
     let i = 0;
     for (const [good] of c.supply) {
       const pip = new THREE.Mesh(new THREE.BoxGeometry(14, 14, 14),
         new THREE.MeshStandardMaterial({ color: GOOD_COLORS[good] }));
-      pip.position.set((i - c.supply.length / 2) * 20, 30, -20);
+      pip.position.set((i - c.supply.length / 2) * 20, 12, -20);
       g.add(pip); i++;
-      goodIcon(g, good, pip.position.x, 37, pip.position.z);
+      goodIcon(g, good, pip.position.x, 19, pip.position.z);
     }
     i = 0;
     for (const [good] of c.demand) {
       const pip = new THREE.Mesh(new THREE.BoxGeometry(14, 14, 14),
         new THREE.MeshStandardMaterial({ color: GOOD_COLORS[good], emissive: GOOD_COLORS[good], emissiveIntensity: 0.25 }));
-      pip.position.set((i - c.demand.length / 2) * 20, 30, 20);
+      pip.position.set((i - c.demand.length / 2) * 20, 12, 20);
       g.add(pip); i++;
-      goodIcon(g, good, pip.position.x, 37, pip.position.z);
+      goodIcon(g, good, pip.position.x, 19, pip.position.z);
     }
     const label = labelSprite(c.name);
-    label.position.y = 55;
+    label.position.y = 34;
     g.add(label);
     const n = map.nodes.find(n => n.id === c.station);
     g.position.set(n.pos[0], 0, n.pos[1]);
@@ -235,6 +272,10 @@ function updateState(s) {
     if (!m) {
       m = new THREE.Group();
       spawnModel('/models/train.glb', m);
+      const lbl = makeLabel();
+      lbl.position.y = 14;
+      m.add(lbl);
+      m.userData.label = lbl;
       scene.add(m);
       world.trainMeshes.set(t.id, m);
     }
@@ -254,6 +295,12 @@ function updateState(s) {
       pos = new THREE.Vector3(n.pos[0], 6, n.pos[1]);
     }
     m.position.copy(pos);
+    // Cargo manifest above the train: what it's carrying, and load/capacity.
+    const parts = t.cargo.map(([g, q]) => `${g} ×${q}`);
+    const loaded = t.cargo.reduce((a, [, q]) => a + q, 0);
+    m.userData.label.setText(
+      `${parts.length ? parts.join('   ') : '— empty —'}   ${loaded}/${t.capacity}`
+    );
   }
 
   // HUD

@@ -83,6 +83,25 @@
     #detail h3 { margin: 0 0 6px; font-size: 13px; }
     #detail .row { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; line-height: 1.7; }
     #detail .row span { color: var(--dim); }
+
+    /* full-screen start / pause overlays */
+    .screen { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center;
+      background: rgba(7, 10, 15, .72); backdrop-filter: blur(4px); }
+    .screen.show { display: flex; }
+    .screen .card { text-align: center; color: var(--text); padding: 34px 46px; }
+    .screen h2 { font-size: 34px; margin: 0 0 6px; letter-spacing: .08em; }
+    .screen .sub { color: var(--dim); font-size: 14px; margin-bottom: 22px; }
+    .screen ul { list-style: none; margin: 0 auto 26px; padding: 0; display: inline-block; text-align: left; }
+    .screen li { font-size: 13.5px; line-height: 2; color: var(--dim); }
+    .screen li b { color: var(--text); }
+    .screen .k { display: inline-block; min-width: 20px; text-align: center; border: 1px solid var(--border);
+      border-radius: 4px; padding: 0 5px; margin-right: 8px; font-size: 11px; color: var(--dim); }
+    .screen .btn { font-size: 15px; padding: 9px 30px; }
+    .screen .btn + .btn { margin-left: 10px; }
+
+    /* bottom-left: minimap */
+    #minimap { bottom: 14px; left: 12px; padding: 8px 10px 6px; pointer-events: none; }
+    #minimap h4 { margin: 0 0 6px; font-size: 10px; letter-spacing: .12em; color: var(--dim); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -119,6 +138,36 @@
       <button class="btn" id="btn-route-confirm">Confirm route</button>
       <button class="btn ghost" id="btn-route-clear">Clear</button>
     </div>
+  </div>
+
+  <!-- start & pause screens -->
+  <div id="screen-start" class="screen show">
+    <div class="card">
+      <h2>🚂 TRAIN LOGISTICS</h2>
+      <div class="sub">Build track, buy trains, deliver cargo. Funds only come from deliveries.</div>
+      <ul>
+        <li><span class="k">1</span><b>Build track</b> · 20 — node → green direction</li>
+        <li><span class="k">2</span><b>Build signal</b> · 50 — node → green neighbour</li>
+        <li><span class="k">3</span><b>Buy train</b> · 200 — click any node</li>
+        <li><span class="k">4</span><b>Plan route</b> — train → nodes → confirm</li>
+        <li><span class="k">␣</span>Pause &nbsp;·&nbsp; <span class="k">R</span>Restart &nbsp;·&nbsp; <span class="k">Esc</span>Select</li>
+      </ul>
+      <button class="btn" id="btn-start">Start</button>
+    </div>
+  </div>
+  <div id="screen-pause" class="screen">
+    <div class="card">
+      <h2>PAUSED</h2>
+      <div class="sub">Money <b id="pause-money" style="color:var(--gold)">0</b> · Score <b id="pause-score" style="color:#7dd3fc">0</b></div>
+      <button class="btn" id="btn-resume">Resume</button>
+      <button class="btn ghost" id="btn-pause-reset">New game</button>
+    </div>
+  </div>
+
+  <!-- bottom-left: minimap -->
+  <div id="minimap" class="panel">
+    <h4>MAP</h4>
+    <canvas id="mm-canvas"></canvas>
   </div>
 
   <!-- toasts + hover detail -->

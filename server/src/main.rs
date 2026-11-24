@@ -21,7 +21,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
 
-use train_sim_engine::command::{self, CmdError};
+use train_sim_engine::command;
 use train_sim_engine::{Command, Sim, SimState};
 
 /// One tick per 100 ms of wall time (at 1x speed).

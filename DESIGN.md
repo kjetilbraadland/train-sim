@@ -86,6 +86,10 @@ tunable; this is the v1 baseline.
       *Labeled assumption (ADR 0015, 2026-11-24): 300 m, matching the
       default map's dominant segment spacing; pending owner confirmation.*
 - [ ] Siding length: how many carriages / how long must it be?
+      *Labeled assumption (ADR 0016, 2026-11-26): one grid cell (300 m),
+      holds one train (capacity 8); whether a siding should be longer or
+      hold multiple trains is the owner's call. Siding placement, enter/exit
+      and the "parked train does not block the junction" rule are implemented.*
 - [ ] Can the player delete placed objects (and get a refund)?
 - [ ] City supply/demand: fixed per city, or do they vary over time?
 - [ ] Max track (any cap), or unbounded?

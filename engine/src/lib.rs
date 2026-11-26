@@ -61,4 +61,15 @@ pub enum Command {
     /// the direction from `from` (must be an endpoint of the edge) toward
     /// the other endpoint. Automatic block-section signal (ADR 0005). M1.
     BuildSignal { edge: u32, from: u32 },
+    /// Build a siding (costs `economy::SIDING_COST`) branching off `node`,
+    /// one grid cell (300 m) in direction `dir` (0=E 1=W 2=N 3=S 4=NE 5=NW
+    /// 6=SE 7=SW). A siding is a short dead-end branch: a train can pull
+    /// onto it so another can pass (ADR 0016). M2.
+    BuildSiding { node: u32, dir: u8 },
+    /// Divert a stopped train onto the siding at `node` (ADR 0016). The
+    /// train parks at the siding's dead-end; while parked it does not
+    /// block the main line.
+    EnterSiding { train_id: u32, node: u32 },
+    /// Send a parked train back onto the main line at `node` (ADR 0016).
+    ExitSiding { train_id: u32, node: u32 },
 }

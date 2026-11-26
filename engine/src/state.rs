@@ -42,6 +42,10 @@ pub struct Train {
     /// The node where the last auto-trade happened (a train stopped at a
     /// station — e.g. one just bought there — trades once, not every tick).
     pub traded_at: Option<u32>,
+    /// When set, the train is in a siding: the value is the main-line node
+    /// it must return to (ADR 0016). A set `in_siding` means the siding at
+    /// that node is occupied (one train per siding).
+    pub in_siding: Option<u32>,
 }
 
 impl Train {
@@ -82,6 +86,8 @@ pub struct SimState {
     pub map: crate::map::Map,
     pub trains: Vec<Train>,
     pub signals: Vec<Signal>,
+    /// Placed sidings (ADR 0016).
+    pub sidings: Vec<crate::map::Siding>,
     /// Discrete tick counter.
     pub tick: u64,
     /// Paused flag.
@@ -104,6 +110,7 @@ impl SimState {
             map: crate::map::default_map(),
             trains: vec![],
             signals: crate::map::default_signals(),
+            sidings: vec![],
             tick: 0,
             paused: false,
             speed: 1.0,
@@ -151,6 +158,7 @@ mod tests {
             id: 0, node: 0, edge: None, progress: 0.0, speed: 10.0,
             route: vec![], route_idx: 0, cargo: vec![], capacity: 10,
             held_by_signal: false, just_arrived: false, traded_at: None,
+            in_siding: None,
         };
         t.set_cargo(Goods::Coal, 3);
         assert_eq!(t.cargo_qty(Goods::Coal), 3);

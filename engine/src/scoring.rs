@@ -14,6 +14,8 @@ pub struct Status {
     pub trains: usize,
     pub signals_green: usize,
     pub signals_red: usize,
+    /// Number of placed sidings (ADR 0016).
+    pub sidings: usize,
 }
 
 impl SimState {
@@ -30,6 +32,7 @@ impl SimState {
             trains: self.trains.len(),
             signals_green: g,
             signals_red: r,
+            sidings: self.sidings.len(),
         }
     }
 }
@@ -45,6 +48,7 @@ mod tests {
             map: default_map(),
             trains: vec![],
             signals: vec![],
+            sidings: vec![],
             tick: 7,
             paused: true,
             speed: 2.0,

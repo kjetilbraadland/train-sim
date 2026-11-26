@@ -28,6 +28,18 @@ pub enum CmdError {
     SignalAlreadyPlaced(u32),
     /// Build: `node` is not an endpoint of `edge`.
     NotEdgeEndpoint { edge: u32, node: u32 },
+    /// Siding: a siding already branches from `node` (in any direction).
+    SidingAlreadyPlaced(u32),
+    /// Siding: a train is currently in the siding at `node` (can't divert
+    /// another in while one is parked).
+    SidingOccupied(u32),
+    /// Siding: no siding is placed at `node`.
+    NoSidingAtNode(u32),
+    /// Siding: the train is not stopped at `node` (must be idle on the
+    /// main line to divert).
+    TrainNotAtNode { train: u32, at: u32, want: u32 },
+    /// Siding: the train is not in a siding.
+    NotInSiding(u32),
     /// Route: empty route.
     EmptyRoute,
     /// Route: route[0] is not the node the train is at.
@@ -55,6 +67,21 @@ impl std::fmt::Display for CmdError {
             }
             CmdError::NotEdgeEndpoint { edge, node } => {
                 write!(f, "node {node} is not an endpoint of edge {edge}")
+            }
+            CmdError::SidingAlreadyPlaced(n) => {
+                write!(f, "a siding already branches from node {n}")
+            }
+            CmdError::SidingOccupied(n) => {
+                write!(f, "a train is currently in the siding at node {n}")
+            }
+            CmdError::NoSidingAtNode(n) => {
+                write!(f, "no siding is placed at node {n}")
+            }
+            CmdError::TrainNotAtNode { train, at, want } => {
+                write!(f, "train {train} is at node {at}, not stopped at node {want}")
+            }
+            CmdError::NotInSiding(n) => {
+                write!(f, "train {n} is not in a siding")
             }
             CmdError::EmptyRoute => write!(f, "route must not be empty"),
             CmdError::RouteWrongStart { node, train_at } => {
@@ -161,6 +188,7 @@ pub fn apply(state: &mut SimState, cmd: &Command) -> Result<(), CmdError> {
                 held_by_signal: false,
                 just_arrived: false,
                 traded_at: None,
+                in_siding: None,
             });
         }
         Command::BuildTrack { from, dir } => {
@@ -210,6 +238,7 @@ pub fn apply(state: &mut SimState, cmd: &Command) -> Result<(), CmdError> {
                 b: target,
                 length,
                 has_signal: false,
+                is_siding: false,
             });
         }
         Command::BuildSignal { edge, from } => {
@@ -241,10 +270,17 @@ pub fn apply(state: &mut SimState, cmd: &Command) -> Result<(), CmdError> {
             state.money -= crate::economy::SIGNAL_COST;
             let id = state.signals.iter().map(|s| s.id).max().unwrap_or(0) + 1;
             // Initial aspect follows the block-section rule (sim.rs
-            // `update_signals` recomputes it every tick).
-            let edge_occupied = state.trains.iter().any(|t| t.edge == Some(*edge));
-            let dest_occupied =
-                state.trains.iter().any(|t| t.edge.is_none() && t.node == to);
+            // `update_signals` recomputes it every tick). A parked train
+            // (in a siding) does not occupy the main edge, but does occupy
+            // its main-line node (ADR 0016).
+            let edge_occupied = state
+                .trains
+                .iter()
+                .any(|t| t.edge == Some(*edge) && t.in_siding.is_none());
+            let dest_occupied = state.trains.iter().any(|t| {
+                (t.edge.is_none() && t.node == to && t.in_siding.is_none())
+                    || t.in_siding == Some(to)
+            });
             state.signals.push(Signal {
                 id,
                 edge: *edge,
@@ -253,6 +289,143 @@ pub fn apply(state: &mut SimState, cmd: &Command) -> Result<(), CmdError> {
                 green: !edge_occupied && !dest_occupied,
             });
         }
+        Command::BuildSiding { node, dir } => {
+            // Validate before mutating (ADR 0011).
+            let step = crate::map::grid_dir_step(*dir)
+                .ok_or(CmdError::InvalidDir(*dir))?;
+            let anchor = state
+                .map
+                .node(*node)
+                .ok_or(CmdError::UnknownNode(*node))?;
+            // One siding per main-line node (in any direction).
+            if state.sidings.iter().any(|s| s.node == *node) {
+                return Err(CmdError::SidingAlreadyPlaced(*node));
+            }
+            if state.money < crate::economy::SIDING_COST {
+                return Err(CmdError::InsufficientFunds {
+                    cost: crate::economy::SIDING_COST,
+                    have: state.money,
+                });
+            }
+            // Target cell: snap to an existing node if close, else create one.
+            let target_pos = [
+                anchor.pos[0] + step[0],
+                anchor.pos[1] + step[1],
+            ];
+            let end_node = match crate::map::node_near(&state.map, target_pos, NODE_MATCH_EPS) {
+                Some(id) => id,
+                None => {
+                    let id = state.map.nodes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
+                    state.map.nodes.push(Node {
+                        id,
+                        pos: target_pos,
+                        city: None,
+                    });
+                    id
+                }
+            };
+            // The siding branch must not overlap an existing (main or siding)
+            // edge between the anchor and the end node.
+            let overlap = state.map.edges.iter().any(|e| {
+                (e.a == *node && e.b == end_node) || (e.b == *node && e.a == end_node)
+            });
+            if overlap {
+                return Err(CmdError::DuplicateEdge(*node, end_node));
+            }
+            state.money -= crate::economy::SIDING_COST;
+            let length = state
+                .map
+                .node_distance(*node, end_node)
+                .unwrap_or(crate::map::GRID_STEP);
+            let edge_id = state.map.edges.iter().map(|e| e.id).max().unwrap_or(0) + 1;
+            state.map.edges.push(Edge {
+                id: edge_id,
+                a: *node,
+                b: end_node,
+                length,
+                has_signal: false,
+                is_siding: true,
+            });
+            let siding_id = state.sidings.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+            state.sidings.push(crate::map::Siding {
+                id: siding_id,
+                edge: edge_id,
+                node: *node,
+                end_node,
+            });
+        }
+        Command::EnterSiding { train_id, node } => {
+            // Validate before mutating (ADR 0011).
+            let t = state
+                .trains
+                .iter()
+                .find(|t| t.id == *train_id)
+                .ok_or(CmdError::UnknownTrain(*train_id))?;
+            if t.node != *node || t.edge.is_some() {
+                return Err(CmdError::TrainNotAtNode {
+                    train: *train_id,
+                    at: t.node,
+                    want: *node,
+                });
+            }
+            if t.in_siding.is_some() {
+                return Err(CmdError::NotInSiding(*train_id)); // already parked
+            }
+            // The siding at `node` must exist and be free.
+            let siding = state.sidings.iter().find(|s| s.node == *node);
+            let Some(siding) = siding else {
+                return Err(CmdError::NoSidingAtNode(*node));
+            };
+            if state.trains.iter().any(|x| x.in_siding == Some(*node)) {
+                return Err(CmdError::SidingOccupied(*node));
+            }
+            let t = state
+                .trains
+                .iter_mut()
+                .find(|t| t.id == *train_id)
+                .expect("train validated above");
+            t.in_siding = Some(*node);
+            t.edge = Some(siding.edge);
+            t.progress = 1.0; // parked at the siding's dead-end
+        }
+        Command::ExitSiding { train_id, node } => {
+            // Validate before mutating (ADR 0011).
+            let t = state
+                .trains
+                .iter()
+                .find(|t| t.id == *train_id)
+                .ok_or(CmdError::UnknownTrain(*train_id))?;
+            if t.in_siding != Some(*node) {
+                return Err(CmdError::NotInSiding(*train_id));
+            }
+            // The main node must be free of other trains before the parked
+            // train re-enters it, or it would block the line again. The
+            // normal block-section signal check (in `move_trains`) handles
+            // holding the train if a downstream edge is red.
+            let main_occupied = state.trains.iter().any(|x| {
+                x.id != *train_id
+                    && x.edge.is_none()
+                    && x.node == *node
+                    && x.in_siding.is_none()
+            });
+            if main_occupied {
+                return Err(CmdError::SidingOccupied(*node));
+            }
+            let t = state
+                .trains
+                .iter_mut()
+                .find(|t| t.id == *train_id)
+                .expect("train validated above");
+            t.in_siding = None;
+            t.edge = None;
+            t.progress = 0.0;
+            t.node = *node;
+            t.held_by_signal = false;
+            // `traded_at` is deliberately left untouched: if the train already
+            // traded at this station before parking, it does not re-trade on
+            // re-entry (no park-and-re-enter exploit). If it had not traded
+            // here, it trades once now, as a normal arrival.
+        }
     }
     Ok(())
 }
@@ -260,7 +433,8 @@ pub fn apply(state: &mut SimState, cmd: &Command) -> Result<(), CmdError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Goods;
+    use crate::Sim;
+    use crate::state::{Goods, Signal};
 
     #[test]
     fn new_game_starts_with_start_funds_and_no_trains() {
@@ -558,5 +732,173 @@ mod tests {
             "money should have grown from deliveries, money={}",
             s.money
         );
+    }
+
+    #[test]
+    fn build_siding_creates_branch_and_costs() {
+        let mut s = SimState::new_game();
+        assert_eq!(s.money, 500);
+        // Node 2 (750,1150) north 300 m -> (750,1450): no node there yet.
+        apply(&mut s, &Command::BuildSiding { node: 2, dir: 2 }).unwrap();
+        assert_eq!(s.money, 420, "siding costs 80");
+        assert_eq!(s.sidings.len(), 1);
+        assert_eq!(s.sidings[0].node, 2);
+        // A new node + a new (siding) edge were created.
+        assert_eq!(s.map.nodes.len(), 15);
+        assert_eq!(s.map.edges.len(), 15);
+        let e = s.map.edge(s.sidings[0].edge).expect("siding edge exists");
+        assert!(e.is_siding, "the branch edge is flagged as a siding");
+    }
+
+    #[test]
+    fn build_siding_duplicate_node_rejected() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuildSiding { node: 2, dir: 2 }).unwrap();
+        // A second siding off the same node (different direction) is rejected.
+        assert_eq!(
+            apply(&mut s, &Command::BuildSiding { node: 2, dir: 0 }),
+            Err(CmdError::SidingAlreadyPlaced(2))
+        );
+        assert_eq!(s.sidings.len(), 1, "no second siding on a rejected build");
+    }
+
+    #[test]
+    fn build_siding_rejected_when_broke() {
+        let mut s = SimState::new_game();
+        s.money = 50;
+        assert_eq!(
+            apply(&mut s, &Command::BuildSiding { node: 2, dir: 2 }),
+            Err(CmdError::InsufficientFunds { cost: 80, have: 50 })
+        );
+        assert_eq!(s.sidings.len(), 0);
+    }
+
+    #[test]
+    fn build_siding_unknown_node_rejected() {
+        let mut s = SimState::new_game();
+        assert_eq!(
+            apply(&mut s, &Command::BuildSiding { node: 999, dir: 0 }),
+            Err(CmdError::UnknownNode(999))
+        );
+    }
+
+    #[test]
+    fn build_siding_invalid_dir_rejected() {
+        let mut s = SimState::new_game();
+        assert_eq!(
+            apply(&mut s, &Command::BuildSiding { node: 2, dir: 9 }),
+            Err(CmdError::InvalidDir(9))
+        );
+    }
+
+    #[test]
+    fn enter_and_exit_siding() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 2 }).unwrap();
+        apply(&mut s, &Command::BuildSiding { node: 2, dir: 2 }).unwrap();
+        // Divert the (stopped) train onto the siding.
+        apply(&mut s, &Command::EnterSiding { train_id: 1, node: 2 }).unwrap();
+        assert_eq!(s.trains[0].in_siding, Some(2));
+        // A parked train is off the main line: it does not block the node.
+        assert!(!Sim::node_occupied(&s, 2));
+        // Exit back onto the main line.
+        apply(&mut s, &Command::ExitSiding { train_id: 1, node: 2 }).unwrap();
+        assert_eq!(s.trains[0].in_siding, None);
+        assert_eq!(s.trains[0].node, 2);
+        assert!(s.trains[0].edge.is_none());
+    }
+
+    #[test]
+    fn enter_siding_rejected_when_occupied() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 2 }).unwrap();
+        apply(&mut s, &Command::BuyTrain { node: 2 }).unwrap();
+        apply(&mut s, &Command::BuildSiding { node: 2, dir: 2 }).unwrap();
+        apply(&mut s, &Command::EnterSiding { train_id: 1, node: 2 }).unwrap();
+        // A second train cannot enter the same (occupied) siding.
+        assert_eq!(
+            apply(&mut s, &Command::EnterSiding { train_id: 2, node: 2 }),
+            Err(CmdError::SidingOccupied(2))
+        );
+    }
+
+    #[test]
+    fn enter_siding_rejected_no_siding_at_node() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 2 }).unwrap();
+        assert_eq!(
+            apply(&mut s, &Command::EnterSiding { train_id: 1, node: 2 }),
+            Err(CmdError::NoSidingAtNode(2))
+        );
+    }
+
+    #[test]
+    fn enter_siding_rejected_when_train_not_stopped_there() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 0 }).unwrap();
+        apply(&mut s, &Command::BuildSiding { node: 2, dir: 2 }).unwrap();
+        // The train is at node 0, not node 2.
+        assert_eq!(
+            apply(&mut s, &Command::EnterSiding { train_id: 1, node: 2 }),
+            Err(CmdError::TrainNotAtNode { train: 1, at: 0, want: 2 })
+        );
+    }
+
+    #[test]
+    fn exit_siding_rejected_when_not_in_siding() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 2 }).unwrap();
+        assert_eq!(
+            apply(&mut s, &Command::ExitSiding { train_id: 1, node: 2 }),
+            Err(CmdError::NotInSiding(1))
+        );
+    }
+
+    #[test]
+    fn parked_train_does_not_block_passer() {
+        // The core throughput property: a train parked in a siding must not
+        // block another train passing the junction node.
+        let mut s = SimState::new_game();
+        // Siding off node 2 (the north line's middle).
+        apply(&mut s, &Command::BuildSiding { node: 2, dir: 2 }).unwrap();
+        // Train 1: parked in the siding at node 2.
+        apply(&mut s, &Command::BuyTrain { node: 2 }).unwrap();
+        apply(&mut s, &Command::EnterSiding { train_id: 1, node: 2 }).unwrap();
+        // Train 2: comes in from node 0 toward node 2.
+        apply(&mut s, &Command::BuyTrain { node: 0 }).unwrap();
+        apply(&mut s, &Command::SetRoute { train_id: 2, route: vec![0, 1, 2] }).unwrap();
+        // A signal on edge 1 (1 -> 2) would be red if the parked train
+        // occupied node 2; it must be green so train 2 can proceed.
+        s.signals.push(Signal {
+            id: 99, edge: 1, from: 1, to: 2, green: true,
+        });
+        for _ in 0..700 {
+            crate::Sim::tick(&mut s);
+        }
+        // The parked train must still be parked (it does not move on its own).
+        assert_eq!(s.trains[0].in_siding, Some(2), "parked train stays parked");
+        // The passing train must have reached node 2 (not blocked by the parker).
+        assert_eq!(
+            s.trains[1].node, 2,
+            "passing train should have reached node 2 despite the parked train"
+        );
+        assert!(s.trains[1].edge.is_none());
+    }
+
+    #[test]
+    fn parked_train_does_not_trade_while_parked() {
+        // A parked train sits on the spur; it must not re-trade while parked.
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 0 }).unwrap();
+        // City A (node 0) supplies Coal; load some, then park it.
+        apply(&mut s, &Command::BuildSiding { node: 0, dir: 2 }).unwrap();
+        apply(&mut s, &Command::EnterSiding { train_id: 1, node: 0 }).unwrap();
+        // Parked: edge is the siding branch, so auto_trade's "stopped at a
+        // station" eligibility (edge.is_none()) is false -> no re-trade.
+        let before = s.score;
+        for _ in 0..50 {
+            crate::Sim::tick(&mut s);
+        }
+        assert_eq!(s.score, before, "a parked train must not trade while parked");
     }
 }

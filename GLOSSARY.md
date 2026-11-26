@@ -17,7 +17,8 @@ code or reports.
   result. No wall clock, no unseeded RNG.
 - **Command** — a player intent the client sends to the server (tagged enum:
   `NewGame`, `SetPaused`, `SetSpeed`, `SetRoute`, `Load`, `Unload`,
-  `BuyTrain`, `BuildTrack`, `BuildSignal`). Applied by `command::apply`
+  `BuyTrain`, `BuildTrack`, `BuildSignal`, `BuildSiding`, `EnterSiding`,
+  `ExitSiding`). Applied by `command::apply`
   in the engine — the server owns no rules.
 - **CmdError** — the error a rejected command returns (e.g.
   `InsufficientFunds`, `UnknownNode`, `UnknownTrain`, `UnsupportedMap`,
@@ -39,8 +40,10 @@ code or reports.
   sections without renaming.
 - **Track segment** — a placed piece of track (costs 20). In the grid model
   it is the edge between two adjacent cells.
-- **Siding** — a short branch track a train can pull onto so another can
-  pass (costs 80). The player's main throughput tool.
+- **Siding** — a short dead-end branch track a train can pull onto so
+  another can pass (costs 80). The player's main throughput tool (ADR 0016).
+  A train parked in a siding is off the main line: it does not move, does
+  not re-trade, and does not block the junction node.
 - **City** — a station hub with a fixed **supply** (goods it produces) and
   **demand** (goods it wants).
 

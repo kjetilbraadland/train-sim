@@ -27,12 +27,31 @@ impl Sim {
     /// section it protects is clear of trains AND the destination node is
     /// not occupied by a train. (A train stopped at the destination keeps the
     /// signal red for other trains, which is correct block-section behaviour.)
+    /// A train parked in a siding is off the main line, so it does NOT block
+    /// the section or the junction node — that is the point of a siding
+    /// (ADR 0016).
     fn update_signals(state: &mut SimState) {
         for s in state.signals.iter_mut() {
-            let edge_occupied = state.trains.iter().any(|t| t.edge == Some(s.edge));
-            let dest_occupied = state.trains.iter().any(|t| t.edge.is_none() && t.node == s.to);
+            let edge_occupied = state
+                .trains
+                .iter()
+                .any(|t| t.edge == Some(s.edge) && t.in_siding.is_none());
+            let dest_occupied = state
+                .trains
+                .iter()
+                .any(|t| t.edge.is_none() && t.node == s.to && t.in_siding.is_none());
             s.green = !edge_occupied && !dest_occupied;
         }
+    }
+
+    /// Whether `node` is occupied by a train *on the main line* (i.e. it
+    /// blocks a passing train). A train parked in a siding is on the spur,
+    /// not the main line, so it does not count (ADR 0016).
+    pub fn node_occupied(state: &SimState, node: u32) -> bool {
+        state
+            .trains
+            .iter()
+            .any(|t| t.edge.is_none() && t.node == node && t.in_siding.is_none())
     }
 
     /// Move each train along its route, respecting signals.
@@ -44,6 +63,12 @@ impl Sim {
         let dt = crate::SIM_DT * state.speed;
         for t in state.trains.iter_mut() {
             t.just_arrived = false;
+            // A parked train (in a siding) does not move: it stays at the
+            // siding's dead-end until the player sends it back (ADR 0016).
+            if t.in_siding.is_some() {
+                t.held_by_signal = false;
+                continue;
+            }
             if t.route.is_empty() {
                 t.edge = None;
                 t.progress = 0.0;
@@ -185,8 +210,10 @@ mod tests {
                 held_by_signal: false,
                 just_arrived: false,
                 traded_at: None,
+                in_siding: None,
             }],
             signals: vec![],
+            sidings: vec![],
             tick: 0,
             paused: false,
             speed: 1.0,
@@ -265,6 +292,7 @@ mod tests {
                 held_by_signal: false,
                 just_arrived: false,
                 traded_at: None,
+                in_siding: None,
             });
             // Move the first train to node 1 (edge 0 is 300 m at 15 m/s = 200 ticks).
         for _ in 0..200 {

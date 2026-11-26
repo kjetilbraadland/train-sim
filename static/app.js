@@ -41,7 +41,7 @@ grid.position.set(900, 0.1, 800);
 scene.add(grid);
 
 // ---------- world objects ----------
-const world = { map: null, mapSig: null, edgeMeshes: new Map(), nodeMeshes: new Map(), cityMeshes: new Map(), signalMeshes: new Map(), trainMeshes: new Map() };
+const world = { map: null, mapSig: null, edgeMeshes: new Map(), nodeMeshes: new Map(), cityMeshes: new Map(), signalMeshes: new Map(), trainMeshes: new Map(), sidingMeshes: new Map() };
 
 // Map node (x, y) -> three.js position (y becomes z, height 2).
 const nodePos = n => new THREE.Vector3(n.pos[0], 2, n.pos[1]);
@@ -113,9 +113,9 @@ function makeLabel() {
 function clearWorld() {
   for (const m of [...world.edgeMeshes.values(), ...world.nodeMeshes.values(),
                    ...world.cityMeshes.values(), ...world.signalMeshes.values(),
-                   ...world.trainMeshes.values()]) scene.remove(m);
+                   ...world.trainMeshes.values(), ...world.sidingMeshes.values()]) scene.remove(m);
   world.edgeMeshes.clear(); world.nodeMeshes.clear(); world.cityMeshes.clear();
-  world.signalMeshes.clear(); world.trainMeshes.clear();
+  world.signalMeshes.clear(); world.trainMeshes.clear(); world.sidingMeshes.clear();
 }
 
 // Build static geometry from the map (called once per NewGame).
@@ -236,6 +236,51 @@ function updateState(s) {
     buildMap(s.map);
     world.map = s.map;
     world.mapSig = sig;
+  }
+
+  // Sidings: a short spur track off the main line + a marker at the dead-end.
+  // A parked train (in_siding) sits at the end node; we tint the marker.
+  for (const sd of (s.sidings ?? [])) {
+    let m = world.sidingMeshes.get(sd.id);
+    if (!m) {
+      const node = s.map.nodes.find(n => n.id === sd.node);
+      const end = s.map.nodes.find(n => n.id === sd.end_node);
+      if (!node || !end) continue;
+      const a = new THREE.Vector3(node.pos[0], 2, node.pos[1]);
+      const b = new THREE.Vector3(end.pos[0], 2, end.pos[1]);
+      const len = a.distanceTo(b);
+      m = new THREE.Group();
+      // The spur track bed (lighter than the main line to read as a branch).
+      const bed = new THREE.Mesh(
+        new THREE.CylinderGeometry(3, 3, len, 8),
+        new THREE.MeshStandardMaterial({ color: 0x6b5a44, roughness: 1 })
+      );
+      bed.position.copy(a).lerp(b, 0.5);
+      bed.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+      m.add(bed);
+      // A distinct marker at the dead-end (a factorio-orange post + lamp).
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.7, 0.7, 8, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.9 })
+      );
+      post.position.copy(b).setY(6);
+      m.add(post);
+      const lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(1.6, 12, 12),
+        new THREE.MeshStandardMaterial({ color: 0xff9933, emissive: 0xff9933, emissiveIntensity: 0.8 })
+      );
+      lamp.position.copy(b).setY(10.5);
+      m.add(lamp);
+      m.userData.lamp = lamp;
+      m.userData.endNode = sd.end_node;
+      scene.add(m);
+      world.sidingMeshes.set(sd.id, m);
+    }
+    // Tint the marker: orange when free, green when a train is parked in it.
+    const occupied = s.trains.some(t => t.in_siding === sd.node);
+    const col = occupied ? 0x22cc44 : 0xff9933;
+    m.userData.lamp.material.color.setHex(col);
+    m.userData.lamp.material.emissive.setHex(col);
   }
 
   // Signals
@@ -385,7 +430,7 @@ const sfx = {
 renderer.domElement.addEventListener('pointerdown', () => sfx.ensure(), { once: true });
 
 function rejectBuild() { sfx.error(); toast('Not enough funds', 'bad'); }
-const COSTS = { track: 20, signal: 50, train: 200 };
+const COSTS = { track: 20, signal: 50, siding: 80, train: 200 };
 function canAfford(cost) {
   if (lastState && lastState.money < cost) { rejectBuild(); return false; }
   return true;
@@ -529,12 +574,13 @@ renderer.setAnimationLoop(() => {
 
 // ---------- build & route UI ----------
 const ui = {
-  mode: 'select',   // select | track | signal | train | route
-  buildFrom: null,  // anchor node id for track/signal ghosts
+  mode: 'select',   // select | track | signal | train | route | siding
+  buildFrom: null,  // anchor node id for track/signal/siding ghosts
   ghosts: null,     // THREE.Group of ghost previews
   routeTrain: null, // selected train id (route mode)
   route: [],        // node ids, starting at the train's node
   routeLine: null,  // route preview group
+  sidingTrain: null,// selected train id for siding enter/exit (select mode)
 };
 
 const raycaster = new THREE.Raycaster();
@@ -544,6 +590,7 @@ const MODE_HINTS = {
   select: 'Pick a tool above, then click the map · Esc cancels',
   track: 'Track: click a node, then a green direction to lay 300 m track (20)',
   signal: 'Signal: click a node, then a green neighbour to place a signal (50)',
+  siding: 'Siding: click a node, then a green direction to lay a passing siding (80)',
   train: 'Train: click any node to buy a train there (200)',
   route: 'Route: click a train, then track nodes; Confirm sends the plan',
 };
@@ -554,11 +601,24 @@ function setMode(mode) {
   ui.mode = mode;
   clearGhosts();
   if (mode !== 'route') { ui.routeTrain = null; ui.route = []; clearRoutePreview(); }
+  if (mode !== 'select') ui.sidingTrain = null; // build/route modes hide siding ops
   document.querySelectorAll('#hotbar .tool').forEach(b =>
     b.classList.toggle('active', b.dataset.mode === mode));
   document.getElementById('context').classList.toggle('route', mode === 'route');
+  document.getElementById('context').classList.toggle('siding', false);
   setHint(MODE_HINTS[mode]);
   updateModeStatus();
+}
+
+// Show the enter/exit siding controls for a train (select mode only).
+function showSidingContext(trainId) {
+  ui.sidingTrain = trainId;
+  document.getElementById('context').classList.add('siding');
+  const t = lastState?.trains?.find(x => x.id === trainId);
+  const inSiding = t?.in_siding != null;
+  setHint(inSiding
+    ? `Train ${trainId} is parked in a siding — "Return to main line" to send it back`
+    : `Train ${trainId} — "Divert to siding" parks it off the line (if a siding is at its node)`);
 }
 
 function updateModeStatus() {
@@ -573,7 +633,7 @@ function updateModeStatus() {
 document.querySelectorAll('#hotbar .tool').forEach(b =>
   b.onclick = () => { sfx.click(); setMode(ui.mode === b.dataset.mode ? 'select' : b.dataset.mode); });
 
-const KEY_MODES = { '1': 'track', '2': 'signal', '3': 'train', '4': 'route' };
+const KEY_MODES = { '1': 'track', '2': 'signal', '3': 'train', '4': 'route', '5': 'siding' };
 addEventListener('keydown', ev => {
   if (KEY_MODES[ev.key]) {
     const m = KEY_MODES[ev.key];
@@ -732,6 +792,39 @@ function showSignalGhosts(nodeId) {
   ui.buildFrom = nodeId;
 }
 
+// Siding ghost previews: one per direction, valid only where no edge/siding
+// already connects the anchor to the target cell and no siding is placed yet.
+function showSidingGhosts(nodeId) {
+  clearGhosts();
+  const from = nodeById(nodeId);
+  if (!from) return;
+  const fp = nodePos(from);
+  const g = new THREE.Group();
+  const alreadySiding = lastState?.sidings?.some(sd => sd.node === nodeId);
+  for (let d = 0; d < 8; d++) {
+    const st = gridStep(d);
+    if (!st) continue;
+    const tp = new THREE.Vector3(fp.x + st[0], 2, fp.z + st[1]);
+    const near = nearNode([fp.x + st[0], fp.z + st[1]]);
+    const edgeExists = near && world.map.edges.some(
+      e => (e.a === nodeId && e.b === near.id) || (e.b === nodeId && e.a === near.id));
+    const ok = !edgeExists && !alreadySiding;
+    const grp = new THREE.Group();
+    grp.userData.tag = { kind: 'ghost-siding', dir: d, ok };
+    // A short spur (lighter than the main track bed) + an end marker.
+    const bed = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, fp.distanceTo(tp), 10), ghostMaterial(ok));
+    bed.position.copy(fp).lerp(tp, 0.5);
+    bed.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tp.clone().sub(fp).normalize());
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(6, 12, 8), ghostMaterial(ok));
+    cap.position.copy(tp);
+    grp.add(bed, cap);
+    g.add(grp);
+  }
+  scene.add(g);
+  ui.ghosts = g;
+  ui.buildFrom = nodeId;
+}
+
 // -- picking ---------------------------------------------------------------
 let downXY = null;
 renderer.domElement.addEventListener('pointerdown', ev => { downXY = [ev.clientX, ev.clientY]; });
@@ -758,7 +851,7 @@ function pick(ev) {
 
 function handleClick(tag) {
   if (!tag) {
-    if (ui.mode === 'track' || ui.mode === 'signal') clearGhosts();
+    if (ui.mode === 'track' || ui.mode === 'signal' || ui.mode === 'siding') clearGhosts();
     return;
   }
   switch (tag.kind) {
@@ -782,6 +875,15 @@ function handleClick(tag) {
       toast(`−${COSTS.signal} funds · signal placed`);
       setHint('Placed a block-section signal (−50)');
       return;
+    case 'ghost-siding':
+      if (!tag.ok) return;
+      if (!canAfford(COSTS.siding)) return;
+      cmd({ type: 'BuildSiding', node: ui.buildFrom, dir: tag.dir });
+      clearGhosts();
+      sfx.build();
+      toast(`−${COSTS.siding} funds · siding built`);
+      setHint('Built a passing siding (−80)');
+      return;
   }
 }
 
@@ -793,6 +895,10 @@ function onNodeClick(nodeId) {
   } else if (ui.mode === 'signal') {
     showSignalGhosts(nodeId);
     setHint(`Anchor node ${nodeId} — click a green neighbour (Esc cancels)`);
+  } else if (ui.mode === 'siding') {
+    if (ui.buildFrom === nodeId) return clearGhosts();
+    showSidingGhosts(nodeId);
+    setHint(`Anchor node ${nodeId} — click a green direction to lay a siding (Esc cancels)`);
   } else if (ui.mode === 'train') {
     if (!canAfford(COSTS.train)) return;
     cmd({ type: 'BuyTrain', node: nodeId });
@@ -809,14 +915,20 @@ function onNodeClick(nodeId) {
 }
 
 function onTrainClick(trainId) {
-  if (ui.mode !== 'route') return;
-  const t = lastState?.trains?.find(x => x.id === trainId);
-  if (!t) return;
-  ui.routeTrain = trainId;
-  ui.route = [t.node];
-  updateModeStatus();
-  rebuildRoutePreview();
-  setHint(`Train ${trainId} selected — click track nodes, then Confirm`);
+  if (ui.mode === 'route') {
+    const t = lastState?.trains?.find(x => x.id === trainId);
+    if (!t) return;
+    ui.routeTrain = trainId;
+    ui.route = [t.node];
+    updateModeStatus();
+    rebuildRoutePreview();
+    setHint(`Train ${trainId} selected — click track nodes, then Confirm`);
+    return;
+  }
+  if (ui.mode === 'select') {
+    // Select mode: show the siding enter/exit controls for this train.
+    showSidingContext(trainId);
+  }
 }
 
 // -- route preview ---------------------------------------------------------
@@ -865,6 +977,23 @@ document.getElementById('btn-route-clear').onclick = () => {
   ui.route = [];
   clearRoutePreview();
   updateModeStatus();
+};
+
+// Siding enter/exit controls (shown when a train is selected in select mode).
+document.getElementById('btn-siding-enter').onclick = () => {
+  const t = lastState?.trains?.find(x => x.id === ui.sidingTrain);
+  if (!t) return;
+  sfx.click();
+  cmd({ type: 'EnterSiding', train_id: t.id, node: t.node });
+  toast(`Sent: divert train ${t.id} to the siding at node ${t.node}`);
+};
+document.getElementById('btn-siding-exit').onclick = () => {
+  const t = lastState?.trains?.find(x => x.id === ui.sidingTrain);
+  if (!t) return;
+  const node = t.in_siding ?? t.node;
+  sfx.click();
+  cmd({ type: 'ExitSiding', train_id: t.id, node });
+  toast(`Sent: train ${t.id} back to the main line at node ${node}`);
 };
 
 // ---------- test hook ----------

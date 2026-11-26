@@ -29,6 +29,22 @@ pub struct Edge {
     pub length: f64,
     /// Whether this segment has a signal protecting it (one direction).
     pub has_signal: bool,
+    /// True if this edge is a siding branch (a short spur off the main line).
+    /// Siding edges are excluded from signal occupancy checks (ADR 0016).
+    pub is_siding: bool,
+}
+
+/// A siding: a short dead-end branch track a train can pull onto so another
+/// can pass. The player's main throughput tool (DESIGN.md §4, ADR 0016).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Siding {
+    pub id: u32,
+    /// The siding branch edge (the edge the train drives onto).
+    pub edge: u32,
+    /// The main-line node the siding branches from.
+    pub node: u32,
+    /// The siding dead-end node (where a diverted train parks).
+    pub end_node: u32,
 }
 
 /// A city: a station hub with goods supply and demand.
@@ -44,13 +60,15 @@ pub struct City {
     pub demand: Vec<(crate::Goods, u32)>,
 }
 
-/// The whole map: nodes + edges + cities.
+/// The whole map: nodes + edges + cities + sidings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Map {
     pub id: String,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub cities: Vec<City>,
+    /// Placed sidings (ADR 0016).
+    pub sidings: Vec<Siding>,
 }
 
 impl Map {
@@ -71,11 +89,13 @@ impl Map {
         let dy = na.pos[1] - nb.pos[1];
         Some((dx * dx + dy * dy).sqrt())
     }
-    /// The edge already connecting `a` and `b`, if any.
+    /// The edge already connecting `a` and `b`, if any. Siding branch edges
+    /// are ignored: a siding shares a main-line node with the main edge, and
+    /// routing/movement should resolve to the main edge, not the spur.
     pub fn edge_between(&self, a: u32, b: u32) -> Option<&Edge> {
         self.edges
             .iter()
-            .find(|e| (e.a == a && e.b == b) || (e.b == a && e.a == b))
+            .find(|e| (!e.is_siding) && ((e.a == a && e.b == b) || (e.b == a && e.a == b)))
     }
 }
 
@@ -177,11 +197,11 @@ pub fn default_map() -> Map {
                supply: vec![(Coal, 3)], demand: vec![(Food, 3), (Timber, 2)] },
     ];
 
-    Map { id: "default".into(), nodes, edges, cities }
+    Map { id: "default".into(), nodes, edges, cities, sidings: vec![] }
 }
 
 fn edge(id: u32, a: u32, b: u32, has_signal: bool) -> Edge {
-    Edge { id, a, b, length: 300.0, has_signal }
+    Edge { id, a, b, length: 300.0, has_signal, is_siding: false }
 }
 
 /// The default signals: one per edge flagged `has_signal` in the default

@@ -98,10 +98,6 @@
       border-radius: 4px; padding: 0 5px; margin-right: 8px; font-size: 11px; color: var(--dim); }
     .screen .btn { font-size: 15px; padding: 9px 30px; }
     .screen .btn + .btn { margin-left: 10px; }
-
-    /* bottom-left: minimap */
-    #minimap { bottom: 14px; left: 12px; padding: 8px 10px 6px; pointer-events: none; }
-    #minimap h4 { margin: 0 0 6px; font-size: 10px; letter-spacing: .12em; color: var(--dim); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -162,12 +158,6 @@
       <button class="btn" id="btn-resume">Resume</button>
       <button class="btn ghost" id="btn-pause-reset">New game</button>
     </div>
-  </div>
-
-  <!-- bottom-left: minimap -->
-  <div id="minimap" class="panel">
-    <h4>MAP</h4>
-    <canvas id="mm-canvas"></canvas>
   </div>
 
   <!-- toasts + hover detail -->

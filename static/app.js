@@ -524,7 +524,6 @@ renderer.setAnimationLoop(() => {
   controls.update();
   updateFloatTexts(dt);
   updateTween(dt);
-  drawMinimap();
   renderer.render(scene, camera);
 });
 
@@ -867,111 +866,6 @@ document.getElementById('btn-route-clear').onclick = () => {
   clearRoutePreview();
   updateModeStatus();
 };
-
-// ---------- minimap ----------
-const mmCanvas = document.getElementById('mm-canvas');
-const mmCtx = mmCanvas.getContext('2d');
-const MM_W = 208, MM_H = 144;
-mmCanvas.width = MM_W * devicePixelRatio;
-mmCanvas.height = MM_H * devicePixelRatio;
-mmCtx.scale(devicePixelRatio, devicePixelRatio);
-
-const mmBounds = { x0: 0, z0: 0, x1: 1, z1: 1 };
-const mmScale = { s: 1, ox: 0, oz: 0 };
-function mmRecompute() {
-  const nodes = world.map?.nodes;
-  if (!nodes?.length) return false;
-  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  for (const n of nodes) {
-    x0 = Math.min(x0, n.pos[0]); z0 = Math.min(z0, n.pos[1]);
-    x1 = Math.max(x1, n.pos[0]); z1 = Math.max(z1, n.pos[1]);
-  }
-  const pad = 60;
-  x0 -= pad; z0 -= pad; x1 += pad; z1 += pad;
-  const s = Math.min(MM_W / (x1 - x0), MM_H / (z1 - z0));
-  Object.assign(mmBounds, { x0, z0, x1, z1 });
-  Object.assign(mmScale, { s, ox: (MM_W - (x1 - x0) * s) / 2, oz: (MM_H - (z1 - z0) * s) / 2 });
-  return true;
-}
-const mmXY = (x, z) => [(x - mmBounds.x0) * mmScale.s + mmScale.ox, (z - mmBounds.z0) * mmScale.s + mmScale.oz];
-
-const mmRay = new THREE.Raycaster();
-const mmPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -2); // y = 2 (track level)
-const mmCorner = [new THREE.Vector2(-1, -1), new THREE.Vector2(1, -1), new THREE.Vector2(1, 1), new THREE.Vector2(-1, 1)];
-const mmHit = new THREE.Vector3();
-
-function drawMinimap() {
-  const mm = world.map;
-  if (!mm || !mmRecompute()) { mmCtx.clearRect(0, 0, MM_W, MM_H); return; }
-  const c = mmCtx;
-  c.clearRect(0, 0, MM_W, MM_H);
-  c.fillStyle = 'rgba(13, 20, 30, .9)';
-  c.fillRect(0, 0, MM_W, MM_H);
-  // edges
-  c.strokeStyle = 'rgba(120, 160, 220, .45)';
-  c.lineWidth = 1;
-  c.beginPath();
-  for (const e of mm.edges) {
-    const a = mm.nodes.find(n => n.id === e.a), b = mm.nodes.find(n => n.id === e.b);
-    if (!a || !b) continue;
-    const [ax, ay] = mmXY(a.pos[0], a.pos[1]);
-    const [bx, by] = mmXY(b.pos[0], b.pos[1]);
-    c.moveTo(ax, ay); c.lineTo(bx, by);
-  }
-  c.stroke();
-  // nodes
-  c.fillStyle = 'rgba(138, 162, 192, .8)';
-  for (const n of mm.nodes) {
-    const [x, y] = mmXY(n.pos[0], n.pos[1]);
-    c.fillRect(x - 1, y - 1, 2, 2);
-  }
-  // cities: gold dot + name initial
-  c.font = '9px system-ui, sans-serif';
-  for (const ct of mm.cities) {
-    const n = mm.nodes.find(n => n.id === ct.station);
-    if (!n) continue;
-    const [x, y] = mmXY(n.pos[0], n.pos[1]);
-    c.fillStyle = '#ffd9a0';
-    c.beginPath(); c.arc(x, y, 3.4, 0, Math.PI * 2); c.fill();
-    c.fillStyle = 'rgba(255, 217, 160, .9)';
-    c.fillText(ct.name[0], x + 4, y - 4);
-  }
-  // trains: bright dot (interpolated along edge)
-  c.fillStyle = '#7dd3fc';
-  for (const t of lastState?.trains ?? []) {
-    let p;
-    if (t.edge != null) {
-      const e = mm.edges.find(e => e.id === t.edge);
-      const a = mm.nodes.find(n => n.id === e.a), b = mm.nodes.find(n => n.id === e.b);
-      if (!a || !b) continue;
-      p = { x: a.pos[0] + (b.pos[0] - a.pos[0]) * t.progress,
-           z: a.pos[1] + (b.pos[1] - a.pos[1]) * t.progress };
-    } else {
-      const n = mm.nodes.find(n => n.id === t.node);
-      if (!n) continue;
-      p = { x: n.pos[0], z: n.pos[1] };
-    }
-    const [x, y] = mmXY(p.x, p.z);
-    c.beginPath(); c.arc(x, y, 2.2, 0, Math.PI * 2); c.fill();
-  }
-  // camera viewport: project the four view corners onto the track plane
-  const pts = [];
-  for (const v of mmCorner) {
-    mmRay.setFromCamera(v, camera);
-    if (mmRay.ray.intersectPlane(mmPlane, mmHit)) pts.push(mmXY(mmHit.x, mmHit.z));
-  }
-  if (pts.length === 4) {
-    c.strokeStyle = 'rgba(255, 255, 255, .55)';
-    c.lineWidth = 1;
-    c.beginPath();
-    c.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < 4; i++) c.lineTo(pts[i][0], pts[i][1]);
-    c.closePath();
-    c.fillStyle = 'rgba(255, 255, 255, .05)';
-    c.fill();
-    c.stroke();
-  }
-}
 
 // ---------- test hook ----------
 window.__ts = {

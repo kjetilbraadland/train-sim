@@ -94,6 +94,9 @@ pub struct SimState {
     pub money: u32,
     /// Deterministic RNG state for demand generation (xorshift64).
     pub rng_state: u64,
+    /// Score at the start of each of the last 100 ticks (10 s window).
+    /// Used to compute the throughput metric (units delivered per 10 s).
+    pub score_window: Vec<u32>,
 }
 
 impl SimState {
@@ -110,6 +113,7 @@ impl SimState {
             score: 0,
             money: crate::economy::START_FUNDS,
             rng_state: 0x5eed,
+            score_window: vec![],
         }
     }
 

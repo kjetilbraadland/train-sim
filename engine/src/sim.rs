@@ -15,6 +15,12 @@ impl Sim {
             return;
         }
         state.tick += 1;
+        // Record the score at the start of this tick for the throughput
+        // window (trailing 10 s = 100 ticks).
+        state.score_window.push(state.score);
+        if state.score_window.len() > 100 {
+            state.score_window.remove(0);
+        }
 
         Self::update_signals(state);
         // Auto-trade runs before movement so a train standing at a station
@@ -193,6 +199,7 @@ mod tests {
             score: 0,
             money: 0,
             rng_state: 0xdeadbeef,
+            score_window: vec![],
         }
     }
 

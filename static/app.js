@@ -330,6 +330,13 @@ function updateState(s) {
   const green = st.signals.filter(x => x.green).length;
   const red = st.signals.length - green;
   document.getElementById('signals').textContent = `${green}g / ${red}r`;
+  // Throughput: units delivered in the trailing 10 s window. The engine
+  // sends score_window (score at the start of each of the last 100 ticks);
+  // the client only does the display math.
+  const win = st.score_window;
+  const tp = win && win.length === 100 ? (st.score - win[0]) / 10 : 0;
+  document.getElementById('throughput').innerHTML =
+    `${tp.toFixed(1)} <small style="font-weight:400">u/10s</small>`;
   if (paused) {
     document.getElementById('pause-money').textContent = st.money;
     document.getElementById('pause-score').textContent = st.score;

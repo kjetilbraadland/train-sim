@@ -74,8 +74,9 @@ code or reports.
 - **Money** — the single currency. Earned from deliveries (+10/unit), spent
   on track/signals/sidings/trains (ADR 0007). No train cap: train count
   is limited only by money (ADR 0014); train speed is fixed (ADR 0013).
-- **Throughput** — units delivered per unit time; the metric the player
-  optimizes.
+- **Throughput** — units delivered in the trailing 10 s window (100 ticks),
+  reported per second; the metric the player optimizes (M2). Computed from
+  a `score_window` of the last 100 ticks (engine, deterministic).
 
 ## Game modes & phases
 

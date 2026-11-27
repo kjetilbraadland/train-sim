@@ -89,6 +89,9 @@ tunable; this is the v1 baseline.
 - [ ] Can the player delete placed objects (and get a refund)?
 - [ ] City supply/demand: fixed per city, or do they vary over time?
 - [ ] Max track (any cap), or unbounded?
+- [ ] Throughput display window: *Labeled assumption (2026-11-27): trailing
+      10 s (100 ticks), reported as units/10 s in the HUD; pending owner
+      confirmation.*
 
 > When an open question blocks work, the cron notes it here and in the daily
 > report, and proceeds with the minimal reasonable assumption *explicitly

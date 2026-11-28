@@ -61,4 +61,13 @@ pub enum Command {
     /// the direction from `from` (must be an endpoint of the edge) toward
     /// the other endpoint. Automatic block-section signal (ADR 0005). M1.
     BuildSignal { edge: u32, from: u32 },
+    /// Remove a track segment and refund `economy::TRACK_COST`. Rejected
+    /// while a train occupies the edge or an endpoint (a train cannot be
+    /// left on a vanished track). M2.
+    DeleteTrack { edge: u32 },
+    /// Remove a signal and refund `economy::SIGNAL_COST`. M2.
+    DeleteSignal { signal: u32 },
+    /// Remove a train and refund `economy::TRAIN_COST`. Rejected while the
+    /// train is moving (a moving train cannot be deleted mid-section). M2.
+    DeleteTrain { train: u32 },
 }

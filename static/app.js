@@ -157,6 +157,7 @@ function buildMap(map) {
 
     g.position.copy(a).add(b).multiplyScalar(0.5).setY(2);
     g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    g.userData.tag = { kind: 'edge', id: e.id };
     scene.add(g);
     world.edgeMeshes.set(e.id, g);
   }
@@ -268,6 +269,7 @@ function updateState(s) {
       lamp.position.y = 12;
       m.add(lamp);
       m.userData.lamp = lamp;
+      m.userData.tag = { kind: 'signal', id: sig.id };
       m.position.copy(pos);
       scene.add(m);
       world.signalMeshes.set(sig.id, m);
@@ -546,6 +548,7 @@ const MODE_HINTS = {
   signal: 'Signal: click a node, then a green neighbour to place a signal (50)',
   train: 'Train: click any node to buy a train there (200)',
   route: 'Route: click a train, then track nodes; Confirm sends the plan',
+  demolish: 'Demolish: click track / a signal / a stopped train to remove it (full refund)',
 };
 
 function setHint(text) { document.getElementById('hint').textContent = text; }
@@ -573,7 +576,7 @@ function updateModeStatus() {
 document.querySelectorAll('#hotbar .tool').forEach(b =>
   b.onclick = () => { sfx.click(); setMode(ui.mode === b.dataset.mode ? 'select' : b.dataset.mode); });
 
-const KEY_MODES = { '1': 'track', '2': 'signal', '3': 'train', '4': 'route' };
+const KEY_MODES = { '1': 'track', '2': 'signal', '3': 'train', '4': 'route', '5': 'demolish' };
 addEventListener('keydown', ev => {
   if (KEY_MODES[ev.key]) {
     const m = KEY_MODES[ev.key];
@@ -746,7 +749,13 @@ renderer.domElement.addEventListener('pointerup', ev => {
 function pick(ev) {
   pointerNdc.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
   raycaster.setFromCamera(pointerNdc, camera);
+  // Edges and signals are only pickable in demolish mode; in build modes they
+  // stay transparent to picking so a ray that crosses a track still reaches the
+  // node behind it (the pre-existing track/signal build behaviour).
   const targets = [...world.nodeMeshes.values(), ...world.trainMeshes.values()];
+  if (ui.mode === 'demolish') {
+    targets.push(...world.edgeMeshes.values(), ...world.signalMeshes.values());
+  }
   if (ui.ghosts) targets.push(ui.ghosts);
   for (const h of raycaster.intersectObjects(targets, true)) {
     let o = h.object;
@@ -764,6 +773,20 @@ function handleClick(tag) {
   switch (tag.kind) {
     case 'node': return onNodeClick(tag.id);
     case 'train': return onTrainClick(tag.id);
+    case 'edge':
+      if (ui.mode !== 'demolish') return;
+      cmd({ type: 'DeleteTrack', edge: tag.id });
+      sfx.build();
+      toast(`+${COSTS.track} funds · track removed`);
+      setHint(`Removed track ${tag.id} (+${COSTS.track})`);
+      return;
+    case 'signal':
+      if (ui.mode !== 'demolish') return;
+      cmd({ type: 'DeleteSignal', signal: tag.id });
+      sfx.build();
+      toast(`+${COSTS.signal} funds · signal removed`);
+      setHint(`Removed signal ${tag.id} (+${COSTS.signal})`);
+      return;
     case 'ghost-track':
       if (!tag.ok) return;
       if (!canAfford(COSTS.track)) return;
@@ -809,6 +832,19 @@ function onNodeClick(nodeId) {
 }
 
 function onTrainClick(trainId) {
+  if (ui.mode === 'demolish') {
+    const t = lastState?.trains?.find(x => x.id === trainId);
+    if (!t) return;
+    if (t.edge != null) {
+      toast('Train is moving — stop it before demolishing', 'bad');
+      return;
+    }
+    cmd({ type: 'DeleteTrain', train: trainId });
+    sfx.build();
+    toast(`+${COSTS.train} funds · train removed`);
+    setHint(`Removed train ${trainId} (+${COSTS.train})`);
+    return;
+  }
   if (ui.mode !== 'route') return;
   const t = lastState?.trains?.find(x => x.id === trainId);
   if (!t) return;

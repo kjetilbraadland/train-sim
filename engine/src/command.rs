@@ -34,6 +34,13 @@ pub enum CmdError {
     RouteWrongStart { node: u32, train_at: u32 },
     /// Route: no edge connects two consecutive route nodes.
     RouteDisconnected { from: u32, to: u32 },
+    /// Delete track: a train occupies the edge or one of its endpoints, so
+    /// removing it would strand the train.
+    EdgeOccupied(u32),
+    /// Delete train: the train is moving (on an edge), not stopped at a node.
+    TrainMoving(u32),
+    /// Delete signal: no such signal.
+    UnknownSignal(u32),
 }
 
 impl std::fmt::Display for CmdError {
@@ -63,6 +70,13 @@ impl std::fmt::Display for CmdError {
             CmdError::RouteDisconnected { from, to } => {
                 write!(f, "no track between nodes {from} and {to}")
             }
+            CmdError::EdgeOccupied(e) => {
+                write!(f, "track {e} is occupied by a train; it cannot be removed")
+            }
+            CmdError::TrainMoving(t) => {
+                write!(f, "train {t} is moving and cannot be deleted")
+            }
+            CmdError::UnknownSignal(s) => write!(f, "unknown signal {s}"),
         }
     }
 }
@@ -252,6 +266,44 @@ pub fn apply(state: &mut SimState, cmd: &Command) -> Result<(), CmdError> {
                 to,
                 green: !edge_occupied && !dest_occupied,
             });
+        }
+        Command::DeleteTrack { edge } => {
+            // Validate before mutating (ADR 0011).
+            let e = state.map.edge(*edge).ok_or(CmdError::UnknownEdge(*edge))?;
+            // A train on the edge or at either endpoint would be stranded by
+            // removing the track, so reject.
+            let occupied = state.trains.iter().any(
+                |t| t.edge == Some(*edge) || t.node == e.a || t.node == e.b,
+            );
+            if occupied {
+                return Err(CmdError::EdgeOccupied(*edge));
+            }
+            state.map.edges.retain(|x| x.id != *edge);
+            // Full refund (labeled assumption, DESIGN.md §8).
+            state.money = state.money.saturating_add(crate::economy::TRACK_COST);
+        }
+        Command::DeleteSignal { signal } => {
+            // Validate before mutating (ADR 0011).
+            if state.signals.iter().all(|s| s.id != *signal) {
+                return Err(CmdError::UnknownSignal(*signal));
+            }
+            state.signals.retain(|s| s.id != *signal);
+            // Full refund (labeled assumption, DESIGN.md §8).
+            state.money = state.money.saturating_add(crate::economy::SIGNAL_COST);
+        }
+        Command::DeleteTrain { train } => {
+            // Validate before mutating (ADR 0011).
+            let t = state
+                .trains
+                .iter()
+                .find(|t| t.id == *train)
+                .ok_or(CmdError::UnknownTrain(*train))?;
+            if t.edge.is_some() {
+                return Err(CmdError::TrainMoving(*train));
+            }
+            state.trains.retain(|t| t.id != *train);
+            // Full refund (labeled assumption, DESIGN.md §8).
+            state.money = state.money.saturating_add(crate::economy::TRAIN_COST);
         }
     }
     Ok(())
@@ -558,5 +610,105 @@ mod tests {
             "money should have grown from deliveries, money={}",
             s.money
         );
+    }
+
+    #[test]
+    fn delete_track_removes_and_refunds() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuildTrack { from: 5, dir: 0 }).unwrap(); // 5-14
+        assert_eq!(s.money, 480);
+        assert_eq!(s.map.edges.len(), 15);
+        apply(&mut s, &Command::DeleteTrack { edge: 14 }).unwrap();
+        assert_eq!(s.money, 500, "full refund of the 20 track cost");
+        assert_eq!(s.map.edges.len(), 14, "edge removed");
+        assert!(s.map.edge_between(5, 14).is_none(), "edge gone");
+    }
+
+    #[test]
+    fn delete_track_unknown_edge_rejected() {
+        let mut s = SimState::new_game();
+        assert_eq!(
+            apply(&mut s, &Command::DeleteTrack { edge: 999 }),
+            Err(CmdError::UnknownEdge(999))
+        );
+        assert_eq!(s.money, 500, "rejected delete must not change state");
+    }
+
+    #[test]
+    fn delete_track_rejected_when_occupied() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 0 }).unwrap();
+        apply(&mut s, &Command::SetRoute { train_id: 1, route: vec![0, 1, 2, 3] })
+            .unwrap();
+        for _ in 0..50 {
+            crate::Sim::tick(&mut s);
+        }
+        // The train is now mid-edge 0 (node 0 -> 1).
+        assert!(s.trains[0].edge == Some(0), "train on edge 0");
+        assert_eq!(
+            apply(&mut s, &Command::DeleteTrack { edge: 0 }),
+            Err(CmdError::EdgeOccupied(0))
+        );
+        assert_eq!(s.map.edges.len(), 14, "edge not removed on rejection");
+    }
+
+    #[test]
+    fn delete_signal_removes_and_refunds() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuildSignal { edge: 0, from: 0 }).unwrap();
+        assert_eq!(s.money, 450);
+        assert_eq!(s.signals.len(), 7);
+        apply(&mut s, &Command::DeleteSignal { signal: 6 }).unwrap();
+        assert_eq!(s.money, 500, "full refund of the 50 signal cost");
+        assert_eq!(s.signals.len(), 6, "signal removed");
+    }
+
+    #[test]
+    fn delete_signal_unknown_rejected() {
+        let mut s = SimState::new_game();
+        assert_eq!(
+            apply(&mut s, &Command::DeleteSignal { signal: 999 }),
+            Err(CmdError::UnknownSignal(999))
+        );
+        assert_eq!(s.money, 500, "rejected delete must not change state");
+    }
+
+    #[test]
+    fn delete_train_removes_and_refunds() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 0 }).unwrap();
+        assert_eq!(s.money, 300);
+        assert_eq!(s.trains.len(), 1);
+        // The train is stopped at node 0 (no route yet) -> deletable.
+        apply(&mut s, &Command::DeleteTrain { train: 1 }).unwrap();
+        assert_eq!(s.money, 500, "full refund of the 200 train cost");
+        assert_eq!(s.trains.len(), 0, "train removed");
+    }
+
+    #[test]
+    fn delete_train_rejected_when_moving() {
+        let mut s = SimState::new_game();
+        apply(&mut s, &Command::BuyTrain { node: 0 }).unwrap();
+        apply(&mut s, &Command::SetRoute { train_id: 1, route: vec![0, 1, 2, 3] })
+            .unwrap();
+        for _ in 0..50 {
+            crate::Sim::tick(&mut s);
+        }
+        assert!(s.trains[0].edge.is_some(), "train is moving");
+        assert_eq!(
+            apply(&mut s, &Command::DeleteTrain { train: 1 }),
+            Err(CmdError::TrainMoving(1))
+        );
+        assert_eq!(s.trains.len(), 1, "train not removed on rejection");
+    }
+
+    #[test]
+    fn delete_train_unknown_rejected() {
+        let mut s = SimState::new_game();
+        assert_eq!(
+            apply(&mut s, &Command::DeleteTrain { train: 999 }),
+            Err(CmdError::UnknownTrain(999))
+        );
+        assert_eq!(s.money, 500, "rejected delete must not change state");
     }
 }

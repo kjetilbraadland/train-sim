@@ -124,12 +124,13 @@
     <button class="tool" data-mode="signal"><span class="key">2</span><span class="name">Build signal</span><span class="cost">50</span><span class="desc">node → green neighbour</span></button>
     <button class="tool" data-mode="train"><span class="key">3</span><span class="name">Buy train</span><span class="cost">200</span><span class="desc">click any node</span></button>
     <button class="tool" data-mode="route"><span class="key">4</span><span class="name">Plan route</span><span class="desc">train → nodes → confirm</span></button>
+    <button class="tool" data-mode="demolish"><span class="key">5</span><span class="name">Demolish</span><span class="desc">click track / signal / train → refund</span></button>
   </div>
 
   <!-- bottom-right: context -->
   <div id="context" class="panel">
     <div class="mode" id="mode-status">Mode: <b>select</b></div>
-    <div class="hint" id="hint">Pick a tool (1–4), then click the map · Esc cancels</div>
+    <div class="hint" id="hint">Pick a tool (1–5), then click the map · Esc cancels</div>
     <div class="route-actions">
       <button class="btn" id="btn-route-confirm">Confirm route</button>
       <button class="btn ghost" id="btn-route-clear">Clear</button>
@@ -146,6 +147,7 @@
         <li><span class="k">2</span><b>Build signal</b> · 50 — node → green neighbour</li>
         <li><span class="k">3</span><b>Buy train</b> · 200 — click any node</li>
         <li><span class="k">4</span><b>Plan route</b> — train → nodes → confirm</li>
+        <li><span class="k">5</span><b>Demolish</b> — click track / signal / stopped train → full refund</li>
         <li><span class="k">␣</span>Pause &nbsp;·&nbsp; <span class="k">R</span>Restart &nbsp;·&nbsp; <span class="k">Esc</span>Select</li>
       </ul>
       <button class="btn" id="btn-start">Start</button>

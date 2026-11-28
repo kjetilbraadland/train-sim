@@ -87,6 +87,12 @@ tunable; this is the v1 baseline.
       default map's dominant segment spacing; pending owner confirmation.*
 - [ ] Siding length: how many carriages / how long must it be?
 - [ ] Can the player delete placed objects (and get a refund)?
+      *Labeled assumption (2026-11-28): yes — `DeleteTrack` / `DeleteSignal` /
+      `DeleteTrain` remove the object and refund its **full** cost. A track
+      is rejected while a train occupies it or an endpoint; a train is
+      rejected while moving. Pending owner confirmation on the refund
+      amount (full vs. partial) and whether deleting a track that a route
+      depends on should also clear that route.*
 - [ ] City supply/demand: fixed per city, or do they vary over time?
 - [ ] Max track (any cap), or unbounded?
 
